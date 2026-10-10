@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "GitHub 项目发现漏斗：扩词 → 搜索 → LLM 打分 → 门槛过滤 → 落盘排序",
+  "description": "GitHub 项目发现漏斗：关键词迭代扩写 → 搜索 → 免费过滤 → LLM 对照查询目标打分 → 门槛过滤 → 导出",
   "engines": { "node": ">=22.5.0" },
   "scripts": {
     "start": "node src/server.mjs",
