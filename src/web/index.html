@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ghscan · GitHub 项目发现漏斗</title>
+<style>
+:root{--bg:#0e1116;--panel:#161b22;--panel2:#1c2230;--line:#2a3340;--fg:#e6edf3;--dim:#8b949e;--acc:#3fb950;--warn:#d29922;--bad:#f85149;--blue:#58a6ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.6 -apple-system,"Segoe UI",Roboto,"Noto Sans CJK SC","Microsoft YaHei",sans-serif}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:18px;flex-wrap:wrap;background:var(--panel)}
+h1{font-size:15px;margin:0;font-weight:600}
+.tabs{display:flex;gap:4px}
+.tab{padding:5px 14px;border-radius:6px;cursor:pointer;color:var(--dim);border:1px solid transparent}
+.tab.on{background:var(--panel2);color:var(--fg);border-color:var(--line)}
+.wrap{padding:18px 20px;max-width:1600px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:16px}
+.card h2{font-size:13px;margin:0 0 12px;color:var(--dim);font-weight:600;letter-spacing:.4px;text-transform:uppercase}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
+.f{display:flex;flex-direction:column;gap:5px}
+.f label{font-size:11px;color:var(--dim)}
+input,textarea,select{background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:7px 9px;font:inherit;font-size:12.5px}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--blue)}
+textarea{resize:vertical;min-height:62px;font-family:inherit}
+.grow{flex:1;min-width:260px}
+button{background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:7px 14px;cursor:pointer;font:inherit;font-size:12.5px}
+button:hover{border-color:var(--blue)}
+button.pri{background:#1f6feb;border-color:#1f6feb;font-weight:600}
+button.pri:hover{background:#2d7ff9}
+button.danger{color:var(--bad);border-color:#5a2a2a}
+button:disabled{opacity:.45;cursor:not-allowed}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;border:1px solid var(--line);background:var(--panel2)}
+.ok{color:var(--acc);border-color:#1f4d2b}.bad{color:var(--bad);border-color:#5a2a2a}.warn{color:var(--warn);border-color:#5a4a1a}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{padding:7px 9px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.3px;position:sticky;top:0;background:var(--panel);z-index:1}
+tbody tr:hover{background:#1a212b}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.sc{font-weight:700;font-variant-numeric:tabular-nums}
+.s-hi{color:var(--acc)}.s-mid{color:var(--warn)}.s-lo{color:var(--dim)}
+.one{color:var(--fg)}
+.sub{color:var(--dim);font-size:11.5px}
+.bar{height:7px;background:#1f6feb;border-radius:2px;min-width:2px}
+.hist{display:flex;gap:3px;align-items:flex-end;height:64px;margin:8px 0}
+.hcol{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:3px}
+.hbar{width:100%;background:#1f6feb;border-radius:2px 2px 0 0;min-height:2px}
+.hlab{font-size:10px;color:var(--dim)}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px}
+pre{background:#0a0d12;border:1px solid var(--line);border-radius:6px;padding:12px;overflow:auto;max-height:520px;font-size:11.5px;line-height:1.5;margin:0}
+.stat{display:flex;gap:20px;flex-wrap:wrap}
+.stat div{display:flex;flex-direction:column}
+.stat b{font-size:17px;font-variant-numeric:tabular-nums}
+.stat span{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px}
+.note{color:var(--dim);font-size:11.5px;margin-top:6px}
+.hide{display:none}
+.tag{font-size:10.5px;color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-left:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>ghscan</h1>
+  <div class="tabs">
+    <div class="tab on" data-t="form">① 表单</div>
+    <div class="tab" data-t="res">② 结果</div>
+    <div class="tab" data-t="kw">③ 关键词前沿</div>
+    <div class="tab" data-t="log">④ 运行日志</div>
+  </div>
+  <div style="margin-left:auto;display:flex;gap:8px;align-items:center" id="hdr"></div>
+</header>
+<div class="wrap">
+
+<!-- ============================ 表单 ============================ -->
+<div id="v-form">
+  <div class="card">
+    <h2>LLM API（兼容 OpenAI /chat/completions）</h2>
+    <div class="row">
+      <div class="f grow"><label>Base URL</label><input id="llmBase" placeholder="https://api.deepseek.com/v1"></div>
+      <div class="f"><label>模型</label><input id="llmModel" placeholder="deepseek-chat" style="width:180px"></div>
+    </div>
+    <div class="row">
+      <div class="f grow"><label>API Key（只写进 data/llm.json，权限 600；接口永远只回脱敏值）</label><input id="llmKey" type="password" placeholder="sk-..."></div>
+      <button id="btnLlm">保存</button>
+      <button id="btnLlmTest">测试连通</button>
+      <span id="llmMsg" class="sub"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>任务</h2>
+    <div class="row">
+      <div class="f grow"><label>关键词（一行一个，或用逗号分隔；LLM 会自动扩成几十个近似搜索词）</label>
+        <textarea id="keywords" placeholder="markdown editor&#10;static site generator&#10;命令行 工具"></textarea></div>
+    </div>
+    <div class="row">
+      <div class="f grow"><label>查询目标（决定排序与过滤的判断依据，写得越具体越准）</label>
+        <textarea id="goal" placeholder="找一个能把 Markdown 转成 PDF 的命令行工具，要活跃维护"></textarea></div>
+    </div>
+    <div class="row">
+      <div class="f"><label>展示数量 n（凑够这么多达标项目就停）</label><input id="wantN" type="number" value="20" style="width:110px"></div>
+      <div class="f"><label>信心度门槛（只用于服务端过滤，<b>不会写进提示词</b>）</label><input id="threshold" type="number" step="0.05" min="0" max="1" value="0.7" style="width:110px"></div>
+      <div class="f"><label>模式</label><select id="mode"><option value="target">目标模式：凑够 n 就停</option><option value="auto">自动模式：一直搜（无数量上限）</option></select></div>
+      <div class="f"><label>并发数</label><input id="concurrency" type="number" value="3" min="1" max="6" style="width:80px"></div>
+    </div>
+    <div class="row">
+      <div class="f"><label>最低 star</label><input id="minStars" type="number" value="20" style="width:90px"></div>
+      <div class="f"><label>最近多少天有更新（0=不限）</label><input id="maxAgeDays" type="number" value="0" style="width:110px"></div>
+      <div class="f"><label>语言（留空=不限）</label><input id="lang" placeholder="Python" style="width:120px"></div>
+      <div class="f"><label>结果上限（0=不限）</label><input id="maxHits" type="number" value="0" style="width:110px"></div>
+    </div>
+    <div class="row">
+      <div class="f"><label><input type="checkbox" id="funnel"> 两段漏斗（先用描述批量粗筛，通过的才取 README）</label>
+        <span class="note">省 core 额度：取 README 的次数降约 80%。免费额度下 60 个/小时 → 300 个/小时。代价是多一次 LLM 调用。</span></div>
+      <div class="f"><label>粗筛门槛</label><input id="coarseThreshold" type="number" step="0.05" value="0.3" style="width:90px"></div>
+    </div>
+    <div class="row">
+      <button class="pri" id="btnStart">开始扫描</button>
+      <button class="danger" id="btnStop">停止当前任务</button>
+      <span id="startMsg" class="sub"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>磁盘阀门（自动模式没有数量上限，所以必须靠这两个阀门兜住闪存）</h2>
+    <div class="row">
+      <div class="f"><label>seen 保留天数（0=不按时间删）</label><input id="seenRetentionDays" type="number" value="180" style="width:120px"></div>
+      <div class="f"><label>库大小上限 MB（0=不限）</label><input id="maxDbMb" type="number" value="1024" style="width:120px"></div>
+      <button id="btnCfg">保存</button>
+      <button id="btnMaint">立即维护一次</button>
+      <span id="maintMsg" class="sub"></span>
+    </div>
+    <div class="note">只删 seen（去重/分数缓存表）。达标结果永不删。DELETE 之后还会自动还页并截断 WAL，否则文件不会变小。</div>
+  </div>
+</div>
+
+<!-- ============================ 结果 ============================ -->
+<div id="v-res" class="hide">
+  <div class="card">
+    <div class="stat" id="resStat"></div>
+  </div>
+  <div class="card">
+    <div class="row">
+      <div class="f"><label>最低分</label><input id="fMin" type="number" step="0.05" style="width:90px"></div>
+      <div class="f"><label>语言</label><input id="fLang" placeholder="Python" style="width:110px"></div>
+      <div class="f"><label>最低 star</label><input id="fStars" type="number" style="width:100px"></div>
+      <div class="f grow"><label>在本结果里搜</label><input id="fQ" placeholder="仓库名 / 一句话里的词"></div>
+      <button id="btnFilter">应用</button>
+      <button id="btnClear">清空</button>
+    </div>
+    <div class="row">
+      <span class="sub" style="margin-right:auto">取走结果：</span>
+      <button data-exp="md">Markdown</button>
+      <button data-exp="csv">CSV</button>
+      <button data-exp="json">JSON</button>
+      <button data-exp="txt">纯文本</button>
+      <button id="btnCopy">复制全部（仓库 + 一句话）</button>
+      <span id="expMsg" class="sub"></span>
+    </div>
+    <div class="note">按你的要求，每行只有「仓库 + 分数 + 一句话」——详细分析在打分后就丢弃了，所以这里没有可展开的内容。要逐个查项目就用上面的导出，或直接点仓库名。</div>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table><thead><tr>
+      <th style="width:44px">#</th><th style="width:60px">分数</th><th style="width:280px">仓库</th>
+      <th>一句话介绍</th><th style="width:70px" class="num">★</th><th style="width:90px">语言</th><th style="width:100px">最后更新</th>
+    </tr></thead><tbody id="resBody"></tbody></table>
+  </div>
+</div>
+
+<!-- ============================ 关键词 ============================ -->
+<div id="v-kw" class="hide">
+  <div class="card">
+    <h2>分数直方图 —— 判断这个分数到底有没有区分力</h2>
+    <div class="hist" id="hist"></div>
+    <div class="sub" id="histStat"></div>
+    <div class="note">如果柱子全挤在一两个格子里（标准差很小），说明模型没在真的区分，得改查询目标或提示词，而不是调门槛。</div>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table><thead><tr>
+      <th style="width:40px">#</th><th>搜索词</th><th style="width:70px">来源</th><th style="width:60px" class="num">页</th>
+      <th style="width:70px" class="num">命中</th><th style="width:70px" class="num">空页</th><th style="width:70px" class="num">总数</th><th style="width:70px">状态</th>
+    </tr></thead><tbody id="kwBody"></tbody></table>
+  </div>
+</div>
+
+<!-- ============================ 日志 ============================ -->
+<div id="v-log" class="hide">
+  <div class="card"><pre id="logBox">（还没有日志）</pre></div>
+</div>
+
+</div>
+<script>
+'use strict';
+var $ = function(s){ return document.querySelector(s); };
+var state = { cur: null, tab: 'form', rows: [], timer: null };
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function nf(v,d){ var n=Number(v); return isFinite(n)? n.toFixed(d===undefined?2:d) : '—'; }
+function mb(b){ b=Number(b||0); return b<1048576 ? (b/1024).toFixed(0)+'KB' : (b/1048576).toFixed(2)+'MB'; }
+function scCls(s){ return s>=0.8?'s-hi':(s>=0.6?'s-mid':'s-lo'); }
+
+function api(path, opts){
+  return fetch(path, opts).then(function(r){ return r.json().then(function(j){
+    if(!r.ok || j.ok===false) throw new Error(j.error || ('HTTP '+r.status));
+    return j; }); });
+}
+function fmtTime(ms){ if(!ms) return '—'; var d=new Date(Number(ms));
+  return (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+
+// ------------------------------------------------------------------ 刷新
+function refresh(){
+  return api('/api/state').then(function(s){
+    var g = s.github, db = s.db, l = s.llm;
+    var hdr = [];
+    hdr.push('<span class="pill ' + (l.configured?'ok':'bad') + '">LLM ' + esc(l.configured? l.model : '未配置') + '</span>');
+    hdr.push('<span class="pill ' + (g.configured?'ok':'bad') + '">GitHub ' + (g.configured?'已认证':'未认证') + '</span>');
+    if(g.rateLimit && g.rateLimit.core){
+      hdr.push('<span class="pill">core 剩 ' + g.rateLimit.core.remaining + '/' + g.rateLimit.core.limit + '</span>');
+      hdr.push('<span class="pill">search 剩 ' + g.rateLimit.search.remaining + '/' + g.rateLimit.search.limit + '</span>');
+    }
+    hdr.push('<span class="pill">库 ' + mb(db.totalBytes) + '</span>');
+    if(db.walBytes > 4194304) hdr.push('<span class="pill warn">WAL ' + mb(db.walBytes) + '</span>');
+    $('#hdr').innerHTML = hdr.join('');
+
+    if(!$('#llmBase').value && l.baseUrl) $('#llmBase').value = l.baseUrl;
+    if(!$('#llmModel').value && l.model) $('#llmModel').value = l.model;
+    if(s.config){
+      if(document.activeElement !== $('#seenRetentionDays')) $('#seenRetentionDays').value = s.config.seenRetentionDays;
+      if(document.activeElement !== $('#maxDbMb')) $('#maxDbMb').value = s.config.maxDbMb;
+    }
+    if(!state.cur){
+      var running = s.runs.filter(function(r){ return r.status==='running'; })[0];
+      state.cur = running ? running.id : (s.runs[0] ? s.runs[0].id : null);
+    }
+    var cur = s.runs.filter(function(r){ return r.id===state.cur; })[0];
+    if(cur){ $('#logBox').textContent = (cur.log && cur.log.length)? cur.log.join('\n') : '（还没有日志）'; }
+    return s;
+  }).catch(function(e){ console.error(e); });
+}
+
+function loadResults(){
+  if(!state.cur){ $('#resBody').innerHTML = '<tr><td colspan="7" class="sub">还没有任务。先去①表单开一个。</td></tr>'; $('#resStat').innerHTML=''; return Promise.resolve(); }
+  var p = new URLSearchParams({ run: state.cur });
+  if($('#fMin').value) p.set('minScore', $('#fMin').value);
+  if($('#fLang').value) p.set('lang', $('#fLang').value);
+  if($('#fStars').value) p.set('minStars', $('#fStars').value);
+  if($('#fQ').value) p.set('q', $('#fQ').value);
+  p.set('limit', '1000');
+  var qs = p.toString();
+  state.qs = qs;
+  return Promise.all([ api('/api/results?' + qs), api('/api/runs/' + state.cur) ]).then(function(a){
+    var d = a[0], det = a[1], run = d.run;
+    state.rows = d.rows;
+    $('#resStat').innerHTML = [
+      ['任务', '#' + run.id],
+      ['状态', run.status + (det.running?' · 运行中':'')],
+      ['门槛', '≥' + nf(run.threshold)],
+      ['达标', d.rows.length + (run.mode==='target' ? (' / ' + run.want_n) : '')],
+      ['已评分', run.scored],
+      ['被丢弃', run.rejected],
+      ['零成本复用', run.reused || 0],
+      ['LLM 调用', (run.llm_calls || 0) + ' 次'],
+      ['tokens', ((run.tokens_in || 0) + (run.tokens_out || 0)).toLocaleString() + (run.tokens_cached ? (' (缓存 ' + run.tokens_cached.toLocaleString() + ')') : '')],
+      ['失败待重试', run.failed],
+      ['搜索词', run.frontier.total + '（退休 ' + run.frontier.retired + '）'],
+    ].map(function(x){ return '<div><b>' + esc(x[1]) + '</b><span>' + x[0] + '</span></div>'; }).join('');
+
+    $('#resBody').innerHTML = d.rows.map(function(r,i){
+      return '<tr>' +
+        '<td class="num sub">' + (i+1) + '</td>' +
+        '<td class="num"><span class="sc ' + scCls(r.score) + '">' + nf(r.score) + '</span></td>' +
+        '<td><a href="' + esc(r.html_url) + '" target="_blank" rel="noreferrer">' + esc(r.full_name) + '</a>' +
+          '<div class="sub">' + esc(String(r.descr||'').slice(0,120)) + '</div></td>' +
+        '<td class="one">' + esc(r.one_line) + '</td>' +
+        '<td class="num">' + (r.stars||0) + '</td>' +
+        '<td>' + esc(r.lang||'') + '</td>' +
+        '<td class="sub">' + esc(r.pushed||'') + '</td>' +
+      '</tr>';
+    }).join('') || '<tr><td colspan="7" class="sub">还没有达标项目。门槛是 ' + nf(run.threshold) + '，正在搜…</td></tr>';
+
+    // 直方图
+    var h = det.histogram;
+    if(h && h.n){
+      var max = Math.max.apply(null, h.bins) || 1;
+      $('#hist').innerHTML = h.bins.map(function(c,i){
+        var lo = (i/10).toFixed(1);
+        return '<div class="hcol" title="' + lo + '~' + ((i+1)/10).toFixed(1) + '：' + c + ' 个">' +
+          '<div class="sub" style="font-size:10px">' + (c||'') + '</div>' +
+          '<div class="hbar" style="height:' + Math.round(c/max*46) + 'px"></div>' +
+          '<div class="hlab">' + lo + '</div></div>';
+      }).join('');
+      $('#histStat').textContent = '已评分 ' + h.n + ' 个　区间 ' + nf(h.min) + '~' + nf(h.max) +
+        '　均值 ' + nf(h.mean,3) + '　标准差 ' + nf(h.sd,4) +
+        (h.sd < 0.05 ? '　⚠ 标准差太小：分数几乎没有区分力' : '');
+    } else { $('#hist').innerHTML=''; $('#histStat').textContent='还没评过分。'; }
+
+    $('#kwBody').innerHTML = (det.keywords||[]).map(function(k,i){
+      return '<tr><td class="num sub">' + (i+1) + '</td>' +
+        '<td class="mono">' + esc(k.q) + '</td>' +
+        '<td class="sub">' + esc(k.origin) + '</td>' +
+        '<td class="num">' + k.page + '</td>' +
+        '<td class="num">' + k.hits + '</td>' +
+        '<td class="num">' + k.dry + '</td>' +
+        '<td class="num sub">' + (k.total_count||'—') + '</td>' +
+        '<td>' + (k.retired? '<span class="pill">已退休</span>' : '<span class="pill ok">在搜</span>') + '</td></tr>';
+    }).join('') || '<tr><td colspan="8" class="sub">还没有关键词。</td></tr>';
+  }).catch(function(e){
+    $('#resBody').innerHTML = '<tr><td colspan="7" class="sub">读取失败：' + esc(e.message) + '</td></tr>';
+  });
+}
+
+// ------------------------------------------------------------------ 交互
+// 标签页切换 + hash 路由：刷新后停在原来那一页，也方便直接链到结果页
+function setTab(name){
+  if(['form','res','kw','log'].indexOf(name) < 0) name = 'form';
+  state.tab = name;
+  document.querySelectorAll('.tab').forEach(function(x){ x.classList.toggle('on', x.dataset.t === name); });
+  ['form','res','kw','log'].forEach(function(v){ $('#v-'+v).classList.toggle('hide', v !== name); });
+  var want = name === 'form' ? location.pathname : '#' + name;
+  if(location.hash.slice(1) !== name && !(name === 'form' && !location.hash)) {
+    try { history.replaceState(null, '', want); } catch(e) { location.hash = name; }
+  }
+  if(name === 'res' || name === 'kw') loadResults();
+}
+document.querySelectorAll('.tab').forEach(function(t){
+  t.addEventListener('click', function(){ setTab(t.dataset.t); });
+});
+window.addEventListener('hashchange', function(){ setTab(location.hash.slice(1) || 'form'); });
+
+$('#btnLlm').addEventListener('click', function(){
+  api('/api/llm', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+    baseUrl: $('#llmBase').value.trim(), model: $('#llmModel').value.trim(), apiKey: $('#llmKey').value.trim() }) })
+  .then(function(r){ $('#llmMsg').textContent = '已保存：' + r.llm.model + ' @ ' + r.llm.baseUrl; $('#llmKey').value=''; refresh(); })
+  .catch(function(e){ $('#llmMsg').textContent = '保存失败：' + e.message; });
+});
+$('#btnLlmTest').addEventListener('click', function(){
+  $('#llmMsg').textContent = '测试中…';
+  api('/api/llm/test', { method:'POST' }).then(function(r){
+    $('#llmMsg').textContent = r.ok ? ('连通 OK　' + r.ms + 'ms　finish=' + r.finishReason + '　返回 ' + JSON.stringify(r.json)) : ('失败：' + r.error);
+  }).catch(function(e){ $('#llmMsg').textContent = '失败：' + e.message; });
+});
+$('#btnStart').addEventListener('click', function(){
+  var b = {
+    keywords: $('#keywords').value, goal: $('#goal').value,
+    wantN: Number($('#wantN').value), threshold: Number($('#threshold').value),
+    mode: $('#mode').value, concurrency: Number($('#concurrency').value),
+    funnel: $('#funnel').checked, coarseThreshold: Number($('#coarseThreshold').value),
+    minStars: Number($('#minStars').value), maxAgeDays: Number($('#maxAgeDays').value),
+    lang: $('#lang').value.trim(), maxHits: Number($('#maxHits').value)
+  };
+  $('#startMsg').textContent = '启动中…';
+  api('/api/runs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(b) })
+  .then(function(r){ state.cur = r.run.id; $('#startMsg').textContent = '已启动任务 #' + r.run.id; refresh(); })
+  .catch(function(e){ $('#startMsg').textContent = '启动失败：' + e.message; });
+});
+$('#btnStop').addEventListener('click', function(){
+  if(!state.cur) return;
+  api('/api/runs/' + state.cur + '/stop', { method:'POST' })
+  .then(function(){ $('#startMsg').textContent = '已请求停止 #' + state.cur; refresh(); })
+  .catch(function(e){ $('#startMsg').textContent = '停止失败：' + e.message; });
+});
+$('#btnCfg').addEventListener('click', function(){
+  api('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+    seenRetentionDays: Number($('#seenRetentionDays').value), maxDbMb: Number($('#maxDbMb').value) }) })
+  .then(function(r){ $('#maintMsg').textContent = '已保存：保留 ' + r.config.seenRetentionDays + ' 天 / 上限 ' + r.config.maxDbMb + 'MB'; })
+  .catch(function(e){ $('#maintMsg').textContent = '失败：' + e.message; });
+});
+$('#btnMaint').addEventListener('click', function(){
+  $('#maintMsg').textContent = '维护中…';
+  api('/api/maintain', { method:'POST' }).then(function(r){
+    var m = r.maintenance;
+    $('#maintMsg').textContent = '按时间删 ' + m.byAge + ' 行，按体积删 ' + m.bySize + ' 行，还页 ' + m.vacuumed +
+      '，库 ' + mb(m.before) + ' → ' + mb(m.after);
+    refresh();
+  }).catch(function(e){ $('#maintMsg').textContent = '失败：' + e.message; });
+});
+$('#btnFilter').addEventListener('click', loadResults);
+$('#btnClear').addEventListener('click', function(){ ['#fMin','#fLang','#fStars','#fQ'].forEach(function(s){ $(s).value=''; }); loadResults(); });
+document.querySelectorAll('button[data-exp]').forEach(function(b){
+  b.addEventListener('click', function(){
+    if(!state.cur) return;
+    window.location = '/api/export?' + state.qs + '&format=' + b.dataset.exp;
+  });
+});
+$('#btnCopy').addEventListener('click', function(){
+  var txt = state.rows.map(function(r,i){
+    return (i+1) + '. [' + Number(r.score).toFixed(2) + '] ' + r.full_name + '  ★' + (r.stars||0) + '\n   ' + r.one_line + '\n   ' + r.html_url;
+  }).join('\n\n');
+  var done = function(){ $('#expMsg').textContent = '已复制 ' + state.rows.length + ' 条到剪贴板'; };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done, function(){ fallback(txt, done); });
+  } else fallback(txt, done);
+});
+function fallback(txt, done){
+  var ta = document.createElement('textarea');
+  ta.value = txt; document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch(e){ $('#expMsg').textContent = '复制失败，请用导出按钮'; }
+  document.body.removeChild(ta);
+}
+
+setTab(location.hash.slice(1) || 'form');
+refresh().then(function(){ if(state.tab==='res'||state.tab==='kw') loadResults(); });
+state.timer = setInterval(function(){ refresh(); if(state.tab==='res'||state.tab==='kw') loadResults(); }, 5000);
+</script>
+</body>
+</html>

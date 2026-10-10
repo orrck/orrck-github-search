@@ -1,0 +1,14 @@
+# 运行时数据（扫描库 / 原始输出 / 本地 LLM 配置）
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# 依赖（本项目用 Node 内置模块，正常无 node_modules）
+node_modules/
+
+# 备份与临时文件
+*.bak
+*.bak-*
+*.log
+.DS_Store

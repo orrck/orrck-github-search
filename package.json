@@ -1,0 +1,12 @@
+{
+  "name": "ghscan",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "GitHub 项目发现漏斗：扩词 → 搜索 → LLM 打分 → 门槛过滤 → 落盘排序",
+  "engines": { "node": ">=22.5.0" },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "scan": "node src/scan.mjs"
+  }
+}
