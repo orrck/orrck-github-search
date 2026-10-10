@@ -367,7 +367,7 @@ src/
 
 ## 作者
 
-**orrckhermos**
+**Orrck Hermos**（GitHub: [@orrck](https://github.com/orrck)）
 
 ## 关于 AI 辅助编码
 
