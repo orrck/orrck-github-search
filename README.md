@@ -376,4 +376,5 @@ src/
 
 ## 许可
 
-尚未指定许可证。如需开源发布，请先补充 `LICENSE` 文件。
+本项目采用 **MIT License**，版权归 **orrck** 所有。详见 [LICENSE](LICENSE)。
+
