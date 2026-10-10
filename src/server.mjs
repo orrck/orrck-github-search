@@ -20,8 +20,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DATA = join(ROOT, "data");
 const DB = join(DATA, "scan.db");
 const SCAN = join(ROOT, "src", "scan.mjs");
-const PORT = Number(process.env.GHSCAN_PORT || 8097);
-const HOST = process.env.GHSCAN_HOST || "127.0.0.1";
+const PORT = Number(process.env.GITHUB_SEARCH_PORT || 8097);
+const HOST = process.env.GITHUB_SEARCH_HOST || "127.0.0.1";
 const EXIT_RECYCLE = 75;
 
 mkdirSync(DATA, { recursive: true });
@@ -334,7 +334,7 @@ const server = createServer(async (req, res) => {
         q: url.searchParams.get("q") || "",
         limit: Math.min(5000, Number(url.searchParams.get("limit") || 1000)),
       });
-      const stamp = "ghscan-run" + runId + "-" + new Date().toISOString().slice(0, 10);
+      const stamp = "Github-search-run" + runId + "-" + new Date().toISOString().slice(0, 10);
       let body, type, ext;
       if (fmt === "json") {
         body = JSON.stringify({ run: { id: run.id, goal: run.goal, keywords: run.keywords, threshold: run.threshold, mode: run.mode, qualified: rows.length }, exportedAt: new Date().toISOString(), rows }, null, 2);
@@ -408,7 +408,7 @@ function sweepAdopted() {
 
 server.listen(PORT, HOST, () => {
   const st = store.stats();
-  console.log("ghscan 已启动  http://" + HOST + ":" + PORT);
+  console.log("Github-search 已启动  http://" + HOST + ":" + PORT);
   console.log("  库 " + st.file + "  " + (st.totalBytes / 1048576).toFixed(2) + "MB  seen=" + st.seen + "  hits=" + st.hits);
   console.log("  LLM " + (llm.configured ? llm.model + " @ " + llm.baseUrl : "【未配置】"));
   console.log("  GitHub " + (gh.configured ? "已认证" : "【未认证：搜索 10/分、core 60/时，且出口 IP 共享会 403】"));

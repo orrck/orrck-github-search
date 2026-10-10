@@ -55,7 +55,7 @@ function loadLlmConfig() {
   return {
     baseUrl: file.baseUrl || process.env.LLM_BASE_URL || "https://api.deepseek.com/v1",
     // apiKeyEnv 优先：配置里只写环境变量名，值从密钥链（含 DSH 凭证库）现取。
-    // 这样换 key 不用改 ghscan 的任何文件。
+    // 这样换 key 不用改 Github-search 的任何文件。
     apiKey: (file.apiKeyEnv ? findKey(file.apiKeyEnv) : "") ||
       file.apiKey || process.env.LLM_API_KEY || findKey("LLM_API_KEY") || "",
     model: file.model || process.env.LLM_MODEL || "deepseek-chat",

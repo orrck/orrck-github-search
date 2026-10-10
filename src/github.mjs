@@ -107,7 +107,7 @@ export class GitHub {
   get configured() { return Boolean(this.token); }
 
   header(accept) {
-    const h = { "User-Agent": "ghscan/1.0", "Accept": accept || "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
+    const h = { "User-Agent": "Github-search/1.0", "Accept": accept || "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
     if (this.token) h.Authorization = "Bearer " + this.token;
     return h;
   }
