@@ -4,10 +4,43 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Github-search · GitHub 项目发现漏斗</title>
+<!--
+  单文件界面（HTML + CSS + JS，零依赖、零构建）。
+
+  为什么是单文件：这个项目整体零第三方依赖、不需要 npm install。
+  界面拆成多个文件就要处理静态资源路由、缓存头、相对路径，
+  而它只需要「跑一条命令，打开一个页面」。加起来 840 行，拆开反而更难改。
+
+  三栏布局与数据来源：
+    左栏  表单 → 提交后【原地切换】为运行日志（不跳页，因为日志要和进度同屏）
+    中栏  统计 / 直方图 / 结果列表  ← /api/runs/:id 与 /api/results
+    右栏  关键词扩词列表            ← /api/runs/:id 的 keywords 字段
+
+  轮询模型（见文件末尾 tick / pollRun）：
+    每 2 秒 GET /api/state 拿全局状态；若有在跑的任务，再串行拉 run 详情+结果。
+    两级轮询是为了「没任务时只花 1 个请求」，而不是无脑全量拉。
+
+  配色不是装饰，是状态语义（详见下面 :root 的注释）。
+-->
 <style>
+/*
+  设计令牌。分四组：底色、描边、文字、语义色。
+  语义色不按「好看」挑，按「它代表什么」挑 —— 同一件事全站只用一种颜色：
+    绿  正常 / 运行中 / 高分(>=0.75) / 达标日志
+    红  故障 / 错误日志 / 停止 / 未连接
+    琥珀 警告 / 中分 / 未配置提示
+    蓝  主操作 / 链接 / 低分直方图
+    紫  一切由 LLM 生成的东西（扩词来源）
+    青  用户提供的东西（user 来源）/ 已打分数
+  这样用户扫一眼颜色就知道「这条是谁产生的、是好是坏」，不必读文字。
+  每色配一个 *Glow 变量专供 box-shadow 发光用，避免到处手写 rgba。
+*/
 :root{
+  /* 底色：从最深的页面底到最亮的抬升面，四级足够做层次 */
   --bg:#080b0f; --bg2:#0c1016; --surface:#111721; --surface2:#161e2a; --surface3:#1c2533;
+  /* 描边三级：line 分隔、line2 控件边框、line3 hover 态 */
   --line:#212b38; --line2:#2c3848; --line3:#3a4759;
+  /* 文字四级：主文、次文、弱化、最弱（占位符/禁用） */
   --fg:#e9eff7; --fg2:#b3c0ce; --muted:#71808f; --faint:#4a5765;
   --green:#3fb950; --green2:#2ea043; --greenGlow:rgba(63,185,80,.42);
   --red:#f85149; --red2:#da3633; --redGlow:rgba(248,81,73,.42);
@@ -91,7 +124,13 @@ button.wide{width:100%;padding:10px;font-size:13px;letter-spacing:.3px}
 button.ghost{background:transparent;box-shadow:none;border-color:var(--line2)}
 
 /* ===== 主栅格 ===== */
+/*
+  三栏栅格。左栏固定宽（表单字段宽度可预期），中栏吃剩余空间（minmax(0,1fr) 里的 0
+  很关键：不写的话 min-content 会把长仓库名撑破栅格、逼出横向滚动条），右栏固定窄。
+  min-height:0 同样是必须的 —— 没有它，内部 overflow:auto 的滚动区不会生效。
+*/
 main{flex:1;display:grid;grid-template-columns:356px minmax(0,1fr) 300px;min-height:0;position:relative;z-index:1}
+/* 中等宽度：右栏（扩词）先让位 —— 它信息密度最低，可以整栏隐藏 */
 @media(max-width:1200px){main{grid-template-columns:312px minmax(0,1fr)}#colRight{display:none}}
 .col{display:flex;flex-direction:column;min-height:0;min-width:0}
 #colLeft{border-right:1px solid var(--line);background:linear-gradient(180deg,rgba(17,23,33,.72),rgba(12,16,22,.72))}
@@ -200,6 +239,12 @@ textarea{resize:vertical;font-family:inherit;line-height:1.55}
 #sKw{color:var(--violet)}
 
 /* 虚化大字 */
+/*
+  「搜索中 / 搜索完毕」虚化大字。刻意做到 4~14% 不透明度：
+  它要传达状态，但不能和真正的数据（统计数字、结果行）抢注意力。
+  运行中用呼吸动画 + 绿色发光放大到 14%，静止态压到 4.5%。
+  放在统计条右侧而不是页面正中，是为了不遮挡结果列表的阅读动线。
+*/
 #ghost{
   position:absolute;right:18px;top:50%;transform:translateY(-50%);
   font-size:38px;font-weight:800;letter-spacing:9px;pointer-events:none;user-select:none;
@@ -212,6 +257,12 @@ textarea{resize:vertical;font-family:inherit;line-height:1.55}
 /* 直方图 */
 #histWrap{flex:0 0 auto;padding:14px 18px 8px;border-bottom:1px solid var(--line)}
 .hist{display:flex;gap:5px;align-items:flex-end;height:74px;margin-bottom:3px}
+/*
+  .hcol 上的 height:100% 是必需的，不是随手写的。
+  柱子用 height:<百分比>% 表示高度，而【百分比高度要求父元素有确定高度】。
+  最初漏了这行，.hcol 被内容撑成"刚好包住柱子"，百分比就只能解析成 0，
+  于是整排柱子退化成几根细线（已实测踩过）。
+*/
 .hcol{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;min-width:0}
 .hbar{
   width:100%;border-radius:3px 3px 0 0;min-height:2px;transition:height .35s cubic-bezier(.4,0,.2,1);
@@ -454,9 +505,34 @@ textarea{resize:vertical;font-family:inherit;line-height:1.55}
 </div>
 
 <script>
+/*
+  前端脚本。没有框架、没有构建，全部原生 DOM 操作。
+  因为整个页面只有一个视图状态机（表单 / 日志）和两种运行状态（跑 / 停），
+  引入框架的收益抵不过它的体积与构建复杂度。
+
+  组织顺序（自上而下即调用方向）：
+    1. 状态与工具        唯一可变状态 S、$ / esc / api 三个工具函数
+    2. 状态绘制          paintGitHub / paintLLM —— 把后端返回值映射成徽章
+    3. 视图切换          showForm / showLog —— 左栏在表单与日志之间原地切换
+    4. 渲染函数          renderStats/Hist/Results/Keywords/Log
+                         每个都是「吃一个后端字段，吐一段 HTML 字符串」的纯函数
+    5. 轮询              tick（全局 2 秒）/ pollRun（任务详情）
+    6. 交互              按钮 onclick 全部集中在文件末尾
+*/
+
+/* 全局可变状态。刻意保持极小 —— 其余一切都从后端每 2 秒拉一次，
+   不做前端缓存，避免「界面显示的进度和真实进度不一致」。 */
 var S = { runId:null, running:false, ended:false, llmOk:false, ghOk:false };
 
 function $(id){ return document.getElementById(id); }
+
+/*
+  HTML 转义。这个函数是【安全边界】，不是格式美化 —— 别删。
+  仓库名、一句话介绍、URL 全部来自 GitHub 上的第三方内容，属于不可信输入。
+  本项目用字符串拼 HTML（innerHTML），所以每个插值点都必须过一遍 esc()。
+  用 split/join 而不是正则，是为了避免正则字面量在不同转义层里出错。
+  注意 URL 也要转义：属性值里的引号闭合同样能注入。
+*/
 function esc(s){
   return String(s == null ? "" : s)
     .split("&").join("&amp;")
@@ -513,6 +589,11 @@ function showMsg(id, cls, text){
 function hideMsg(id){ $(id).className = "msg"; }
 
 /* ---------------- 视图切换 ---------------- */
+/*
+  左栏在「表单」与「日志」之间原地切换，而不是弹新页面或新标签。
+  理由：扫描一开始，用户最想看的是「它在干什么」；但也不能失去重新发起查询的能力。
+  所以保留「返回表单」按钮，并且切回去时不清空输入框 —— 便于改个词再跑一次。
+*/
 function showForm(){
   $("formView").style.display = "block";
   $("logView").classList.remove("on");
@@ -543,6 +624,14 @@ function renderGhost(){
   else { g.textContent = "待命"; g.className = ""; }
 }
 
+/*
+  直方图。数据来自 /api/runs/:id 的 histogram，形状由 db.mjs:scoreHistogram 定义：
+    { n, bins:number[10], min, max, mean, sd }
+  min/max 在「一个都没评分」时是 null —— 必须判空，否则 toFixed 会抛异常。
+  bins 的下标含义是「分数落在 [i/10, (i+1)/10)」，所以标签直接用 i/n。
+  第 7 格起（>=0.7）涂成绿色，和后端默认入列门槛 0.7 对齐 ——
+  让用户一眼看到「有多少条够得着门槛」。
+*/
 function renderHist(hist){
   var wrap = $("hist"), lab = $("histLab"), meta = $("histMeta");
   if (!hist || !hist.bins || !hist.bins.length){
@@ -574,6 +663,12 @@ function renderHist(hist){
   meta.innerHTML = m;
 }
 
+/*
+  结果列表。rows 来自 /api/results，是 hits 表的行：
+    { full_name, html_url, score, one_line, stars, lang, pushed, descr, topics }
+  这里只用前七个。score 是 0~1 的小数，按 .75 / .5 两档染色。
+  运行中且暂无结果时显示「正在搜索…」而不是空白 —— 空态会让人以为已结束。
+*/
 function renderResults(rows){
   var box = $("results");
   if (!rows || !rows.length){
@@ -602,6 +697,16 @@ function renderResults(rows){
   box.innerHTML = h;
 }
 
+/*
+  关键词扩词。kws 来自 /api/runs/:id 的 keywords，即 frontier 表的行：
+    { q, page, origin, depth, hits, dry, total_count, retired }
+
+  depth 是扩词轮次：1=初始扩写，2/3=带着前半程结果再要的新角度。
+  origin 说明这个词是谁给的：user（用户输入）/ llm-d1..d3（LLM 生成）。
+  dry>0 表示这个词搜出来全是见过的仓库、没有新结果 —— 划掉并标「无新结果」，
+      这不是失败，是「这条路已经挖干净了」，所以用弱化色而不是红色。
+  retired 表示已退出前沿队列（不再翻页）。
+*/
 function renderKeywords(kws){
   var box = $("kwList");
   if (!kws || !kws.length){
@@ -651,6 +756,15 @@ function renderLog(lines){
 }
 
 /* ---------------- 轮询 ---------------- */
+/*
+  任务状态 → 视觉。全站的状态色只在这里决定，别处不要再写死颜色。
+    运行中   绿点 + 呼吸动画 + 顶部流光条
+    已完成   绿点常亮（不再呼吸）
+    失败     红点
+    已停止   灰点
+  「running」以后端为准（run.status），本地 S.running 只是缓存 ——
+  否则用户切走标签页再回来，界面会以为自己还在跑。
+*/
 function setRunState(run, running){
   if (!run) return;
   S.running = !!running && run.status === "running";
@@ -681,6 +795,11 @@ function setRunState(run, running){
   $("btnStop").disabled = !(S.running || run.status === "stopping");
 }
 
+/*
+  第一级轮询：只拉全局状态（LLM 配置、GitHub 额度、最近任务列表）。
+  顺手做一件重要的事：如果 URL 里没有任务、但后端有正在跑的任务，就自动接管它。
+  这样刷新页面或换设备打开，都能直接看到正在进行的扫描，而不是回到空表单。
+*/
 function tick(){
   api("/api/state").then(function(st){
     if (!st || !st.ok) return;
@@ -697,6 +816,14 @@ function tick(){
   }).catch(function(){});
 }
 
+/*
+  第二级轮询：任务详情（日志 / 扩词 / 直方图）+ 结果行。
+
+  两次请求是【串行】的（第二个 .then 里才发 /api/results），原因：
+    1. run 详情里带 run 状态，先拿到它才知道要不要继续拉结果；
+    2. 并发两个请求会让「先到的旧结果覆盖后到的新状态」。
+  本地 SQLite，两个请求都是毫秒级，串行的代价可以忽略。
+*/
 function pollRun(){
   var id = S.runId;
   if (!id) return;
@@ -721,6 +848,14 @@ $("advToggle").onclick = function(){
   $("advBox").classList.toggle("open");
 };
 
+/*
+  开始查询。表单默认值刻意固定为：启用漏斗 / 展示 20 条 / 粗筛 0.3 / 入列门槛 0.7。
+  这四个不出现在首屏表单里，只显示一行「默认」提示 —— 它们收在「高级选项」中，
+  因为绝大多数时候不该需要调；但用户想调时必须能调。
+
+  提交成功后【不关闭左栏表单】，而是切到日志视图 —— 让用户立刻看到第一行输出，
+  这比任何 toast 都更能说明「真的跑起来了」。
+*/
 $("btnStart").onclick = function(){
   var kw = $("kw").value.trim();
   var goal = $("goal").value.trim();
@@ -778,6 +913,15 @@ $("btnBack").onclick = function(){
 };
 
 /* ---------------- 接入 API ---------------- */
+/*
+  为什么单独做成弹窗而不是放进表单：
+    LLM 配置是一次性设置，而关键词/查询目标每轮都改。混在一起会让每次查询都被迫
+    扫过一堆不相关的字段。放在右上角，符合「配置」与「操作」分离的直觉。
+
+  「测试连通」会在服务端真实发一次最小请求（POST /api/llm/test），
+  而不是只校验字段格式 —— 地址写错、key 失效、模型名不存在，只有真打一次才知道。
+  测试前会先把当前填的值 POST 到 /api/llm 覆盖内存配置，否则测的是旧配置。
+*/
 $("btnApi").onclick = function(){
   $("apiMask").classList.add("on");
   hideMsg("apiMsg");
