@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, dirname, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Store, goalHash } from "./db.mjs";
-import { LlmClient } from "./llm.mjs";
+import { LlmClient } from "./llm.mjs";   // 也用于 /api/llm/test 的临时探测实例
 import { findKey } from "./keys.mjs";
 import { GitHub } from "./github.mjs";
 
@@ -191,16 +191,21 @@ const server = createServer(async (req, res) => {
     // ------------------------------------------------------------- LLM 配置
     if (path === "/api/llm" && req.method === "POST") {
       const b = await readBody(req, 8192);
-      llm.setConfig(b);
       /*
-        dryRun：只把配置装进内存，不写 llm.json。
-        界面的「测试连通」走这条路 —— 它要先让服务端用新地址发一次真实请求，
-        但测试【失败】时不该把坏配置持久化（旧配置会被覆盖，且 configured 只看非空，
-        下次扫描会直接拿坏地址去跑）。只有「保存」才落盘。
+        dryRun：什么都不做，直接拒绝。
+        【为什么要拒绝而不是"只装内存不落盘】—— 第三轮盲审实测出来：
+        只要动过全局 llm，即使没写 llm.json，/api/state 就会报 configured:true，
+        界面显示"已接入"、/api/runs 的门禁也放行；但扫描子进程只读磁盘上的 llm.json，
+        于是"界面和门禁用内存配置、扫描用磁盘旧配置"两套事实并存。
+        测试连通不该污染任何全局状态，它走 /api/llm/test 用临时 client。
       */
       if (b.dryRun) {
-        return send(res, 200, { ok: true, llm: llm.describe(), dryRun: true });
+        return send(res, 400, {
+          ok: false,
+          error: "dryRun 不写配置；测试连通请直接调 /api/llm/test",
+        });
       }
+      llm.setConfig(b);
       // 落盘 0600；GET 永远只回脱敏值
       // 保留已有的 apiKeyEnv：界面只改模型/地址时不该把间接引用冲掉。
       // 只有用户显式填了新 key 才把它写进文件。
@@ -223,11 +228,28 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { ok: true, github: gh.describe() });
     }
 
-    /** 一发冒烟测试：确认 api 地址/key/模型真的能出 JSON，不用等扫描跑起来才发现配错。 */
+    /**
+     * 一发冒烟测试：确认 api 地址/key/模型真的能出 JSON，不用等扫描跑起来才发现配错。
+     *
+     * 【第三轮盲审后重构】可以带配置体，用【临时 LlmClient】发请求 —— 不碰全局 llm，
+     * 不写 llm.json。这样"测试失败"绝不会留下任何痕迹。
+     * 不带配置体时退回测全局配置（兼容旧用法）。
+     */
     if (path === "/api/llm/test" && req.method === "POST") {
       const t0 = Date.now();
+      let probe = llm;
       try {
-        const out = await llm.json([
+        const b = await readBody(req, 8192).catch(function () { return null; });
+        if (b && (b.baseUrl || b.model || b.apiKey)) {
+          // 缺的字段用已保存配置补，避免"只填了模型"就把地址清空
+          const merged = Object.assign({
+            baseUrl: llm.baseUrl, model: llm.model, apiKey: llm.apiKey,
+            temperature: llm.temperature, timeoutMs: llm.timeoutMs, maxTokens: llm.maxTokens,
+          }, b);
+          delete merged.dryRun;
+          probe = new LlmClient(merged);
+        }
+        const out = await probe.json([
           { role: "system", content: "只输出 JSON。" },
           { role: "user", content: '回复 {"ok":true,"n":42}' },
         ], { maxTokens: 200 });

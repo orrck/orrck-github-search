@@ -280,7 +280,15 @@ textarea{resize:vertical;font-family:inherit;line-height:1.55}
 #ghost.done{color:var(--fg2);opacity:.07}
 #ghost.fail{color:var(--red);opacity:.09}
 /* B5：停止中用琥珀，与状态点同色。原来复用 .live（绿色），一个停止动作出现两种语义色 */
-#ghost.warn{color:var(--amber);opacity:.09;animation:breathe 3s ease-in-out infinite}
+/*
+  修 5：只改 color 不够 —— breathe 关键帧里写死了 --greenGlow，
+  结果是"琥珀字 + 绿色光晕"。这里给 warn 单独一套 keyframes。
+*/
+#ghost.warn{color:var(--amber);opacity:.09;animation:breatheAmber 3s ease-in-out infinite}
+@keyframes breatheAmber{
+  0%,100%{opacity:.045;text-shadow:none}
+  50%{opacity:.14;text-shadow:0 0 40px var(--amberGlow)}
+}
 @keyframes breathe{0%,100%{opacity:.045;text-shadow:none}50%{opacity:.14;text-shadow:0 0 40px var(--greenGlow)}}
 
 /* 直方图 */
@@ -589,7 +597,8 @@ var S = {
   suppressAdopt: false, // 用户主动点了「返回表单」，别被 tick 又拉回去
   starting: false,      // 正在 POST /api/runs —— 期间别让 tick 把按钮点亮（防双提交）
   saving: false,        // 正在保存 LLM 配置
-  staleBefore: 0        // 早于此时刻发出的 /api/state 响应一律作废（防旧值覆盖刚保存的配置）
+  staleBefore: 0,       // 早于此时刻发出的 /api/state 响应一律作废（防旧值覆盖刚保存的配置）
+  pollEpoch: 0          // 每次切走/换任务就自增；在途的旧轮询响应据此丢弃（防劫持）
 };
 
 function $(id){ return document.getElementById(id); }
@@ -900,9 +909,14 @@ function setRunState(run, running){
     状态仍是 running 但没有句柄，值为 false。用它驱动 UI 会让正在跑的任务
     显示成灰点+待命+停止按钮禁用，长跑任务根本没法从界面停。
   */
-  // 让 S.runId 与实际显示的 run 保持一致 —— 否则「返回表单」时记下的 keepId
-  // 可能还是上一轮遗留的 id，resumeBar 会指向一个错的任务。
-  if (run.id !== undefined && run.id !== null) S.runId = Number(run.id);
+  /*
+    【第三轮盲审后回退】这里【不能】写 S.runId。
+    上一轮为了修 resumeBar 指错任务加了一行 S.runId = run.id，结果引入了更严重的问题：
+    「返回表单」之后，一个【在途的】旧 /api/runs/:id 响应到达时会把 S.runId 复活，
+    中央区复位被撤销；更糟的是若用户此时新建了任务 #43，旧响应会把界面劫持回 #42，
+    点"停止"停的是 42 而不是用户以为的 43。
+    现在 runId 只由 adopt / btnStart / btnResume 三处显式赋值，并配合 pollEpoch 丢弃陈旧响应。
+  */
   S.status = st;
   S.running = (st === "running");
   S.stopping = (st === "stopping");
@@ -952,6 +966,42 @@ function tick(){
       用发请求时刻与 staleBefore 比较即可丢弃。
     */
     if (t0 >= S.staleBefore) paintLLM(st.llm);
+
+    /*
+      修 4：resumeBar 只在「返回表单」那一刻写过文案，之后从不更新。
+      于是任务已经结束/被停，它还一直写着"仍在运行（未停止）"（第三轮盲审实测）。
+      这里每次 tick 用 st.runs 按 data-run 核对一次真实状态。
+    */
+    var bar = $("resumeBar");
+    var barId = Number(bar.getAttribute("data-run") || 0);
+    if (!bar.hidden && barId){
+      var found = null, rr = st.runs || [];
+      for (var ri = 0; ri < rr.length; ri++){
+        if (Number(rr[ri].id) === barId){ found = rr[ri]; break; }
+      }
+      var barSt = found ? found.status : "";
+      if (barSt === "running"){
+        $("resumeText").textContent = "任务 #" + barId + " 仍在运行（未停止）";
+        bar.style.borderColor = "rgba(63,185,80,.4)";
+        bar.style.background = "rgba(63,185,80,.08)";
+        $("resumeText").style.color = "#7ee787";
+        $("btnResume").textContent = "回到日志";
+      } else if (barSt === "stopping"){
+        $("resumeText").textContent = "任务 #" + barId + " 正在停止…";
+        bar.style.borderColor = "rgba(210,153,34,.4)";
+        bar.style.background = "rgba(210,153,34,.08)";
+        $("resumeText").style.color = "#e3b341";
+        $("btnResume").textContent = "查看";
+      } else if (barSt === "done" || barSt === "failed" || barSt === "stopped"){
+        var label = barSt === "done" ? "已完成" : (barSt === "failed" ? "失败" : "已停止");
+        $("resumeText").textContent = "任务 #" + barId + " " + label + "（点查看日志）";
+        bar.style.borderColor = "var(--line2)";
+        bar.style.background = "rgba(28,37,51,.55)";
+        $("resumeText").style.color = "var(--muted)";
+        $("btnResume").textContent = "查看日志";
+      }
+      // 找不到（被清理了）就保持原样，让用户还能点进去看错误
+    }
     /*
       自动接管正在跑的任务 —— 但【只在用户没主动退出时】。
       原来无条件下，点「返回表单」后 2 秒就被拉回日志，那个按钮等于没用。
@@ -979,18 +1029,28 @@ function tick(){
 function pollRun(){
   var id = S.runId;
   if (!id) return;
+  /*
+    epoch 守卫：两段 then 都要先确认"现在我还在看同一个任务"。
+    场景：/api/runs/42 延迟 2 秒，用户已经点了返回表单并新建 #43 ——
+    旧响应到达时若不校验，就会把界面、日志、S.runId 全劫持回 42。
+  */
+  var ep = S.pollEpoch;
+  var fresh = function(){ return ep === S.pollEpoch && S.runId === id; };
+
   api("/api/runs/" + id).then(function(d){
-    if (!d || !d.ok) return;
+    if (!fresh()) return null;
+    if (!d || !d.ok) return null;
     setRunState(d.run, d.running);
     renderKeywords(d.keywords);
     renderHist(d.histogram);
     renderLog(d.log);
-    return api("/api/results?run=" + id + "&limit=200");
-  }).then(function(res){
-    if (res && res.ok){
-      renderResults(res.rows);
-      if (res.run) setRunState(res.run, S.running);
-    }
+    return api("/api/results?run=" + id + "&limit=200").then(function(res){
+      if (!fresh()) return;          // 结果这次请求也可能慢，同样要再校验一次
+      if (res && res.ok){
+        renderResults(res.rows);
+        if (res.run) setRunState(res.run, S.running);
+      }
+    });
   }).catch(function(){});
 }
 
@@ -1043,6 +1103,7 @@ $("btnStart").onclick = function(){
       return;
     }
     S.runId = r.run.id;
+    S.pollEpoch++;                 // 丢弃上一个任务在途的轮询响应（防劫持新任务）
     S.suppressAdopt = false;
     $("resumeBar").hidden = true;
     S.running = true; S.ended = false;
@@ -1061,6 +1122,7 @@ $("btnResume").onclick = function(){
   if (!id) return;
   S.suppressAdopt = false;
   S.runId = id;
+  S.pollEpoch++;
   this.parentNode.hidden = true;
   showLog();
   pollRun();
@@ -1092,6 +1154,7 @@ $("btnBack").onclick = function(){
   var keepId = S.runId;
 
   S.runId = null;
+  S.pollEpoch++;                 // 作废所有在途轮询，否则旧响应会把 S.runId 复活
   S.running = false; S.stopping = false; S.active = false; S.ended = false; S.status = "";
   S.suppressAdopt = true;      // 直到用户新建任务或点 resume，否则 tick 别再拉我回去
 
@@ -1133,7 +1196,13 @@ $("btnApi").onclick = function(){
   $("apiMask").classList.add("on");
   S.apiDirty = false;
   hideMsg("apiMsg");
-  api("/api/state").then(function(st){ if (st && st.ok) paintLLM(st.llm); });
+  /*
+    修 3：这里原来自己发一个 /api/state 且没有 staleBefore 守卫。
+    如果它比保存动作更早发出、却更晚返回，就会把刚保存的配置覆盖回旧的
+    （第三轮盲审实测：字段、keyHint、警告、按钮状态全部回退）。
+    改为复用 tick() —— 那条路径已经有 staleBefore 与 apiDirty 双重守卫。
+  */
+  tick();
   // 焦点移进弹窗，否则 Tab 会先走背景表单（无障碍审计提的焦点管理问题）
   setTimeout(function(){ $("llmBase").focus(); $("llmBase").select(); }, 30);
 };
@@ -1181,17 +1250,17 @@ $("btnTest").onclick = function(){
   btn.disabled = true; btn.textContent = "测试中…";
   showMsg("apiMsg", "info", "正在用当前配置发一次真实请求…");
   /*
-    测试连通带 dryRun:true —— 只装进内存让服务端用它发一次请求，不落盘。
-    原来这里先 POST /api/llm 会直接 saveJson：测试失败（比如 401）时坏地址已经被持久化，
-    旧配置丢了，下次扫描就会拿坏地址去跑。
+    修 1：直接把当前表单里的配置发给 /api/llm/test，由服务端用【临时 LlmClient】发一次真实请求。
+    不再先 POST /api/llm ——
+      之前那版会 saveJson 落盘（测试失败也留下坏配置）；
+      上一轮改成 dryRun 后仍然污染了全局 llm 内存（界面说"已接入"、扫描却读磁盘的旧配置）。
+    现在测试不碰任何持久化状态，也不碰全局实例。
   */
-  var payload = { baseUrl: $("llmBase").value.trim(), model: $("llmModel").value.trim(), dryRun: true };
+  var payload = { baseUrl: $("llmBase").value.trim(), model: $("llmModel").value.trim() };
   var k = $("llmKey").value.trim();
   if (k) payload.apiKey = k;
-  api("/api/llm", {
+  api("/api/llm/test", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
-  }).then(function(){
-    return api("/api/llm/test", { method: "POST" });
   }).then(function(t){
     btn.disabled = false; btn.textContent = "测试连通";
     if (t && t.ok) showMsg("apiMsg", "ok", "连通成功 · " + t.ms + "ms · 模型 " + (t.model || "?"));
