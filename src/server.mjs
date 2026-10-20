@@ -192,6 +192,15 @@ const server = createServer(async (req, res) => {
     if (path === "/api/llm" && req.method === "POST") {
       const b = await readBody(req, 8192);
       llm.setConfig(b);
+      /*
+        dryRun：只把配置装进内存，不写 llm.json。
+        界面的「测试连通」走这条路 —— 它要先让服务端用新地址发一次真实请求，
+        但测试【失败】时不该把坏配置持久化（旧配置会被覆盖，且 configured 只看非空，
+        下次扫描会直接拿坏地址去跑）。只有「保存」才落盘。
+      */
+      if (b.dryRun) {
+        return send(res, 200, { ok: true, llm: llm.describe(), dryRun: true });
+      }
       // 落盘 0600；GET 永远只回脱敏值
       // 保留已有的 apiKeyEnv：界面只改模型/地址时不该把间接引用冲掉。
       // 只有用户显式填了新 key 才把它写进文件。

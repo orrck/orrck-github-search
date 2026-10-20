@@ -279,6 +279,8 @@ textarea{resize:vertical;font-family:inherit;line-height:1.55}
 #ghost.live{color:var(--green);animation:breathe 3s ease-in-out infinite}
 #ghost.done{color:var(--fg2);opacity:.07}
 #ghost.fail{color:var(--red);opacity:.09}
+/* B5：停止中用琥珀，与状态点同色。原来复用 .live（绿色），一个停止动作出现两种语义色 */
+#ghost.warn{color:var(--amber);opacity:.09;animation:breathe 3s ease-in-out infinite}
 @keyframes breathe{0%,100%{opacity:.045;text-shadow:none}50%{opacity:.14;text-shadow:0 0 40px var(--greenGlow)}}
 
 /* 直方图 */
@@ -427,6 +429,13 @@ textarea{resize:vertical;font-family:inherit;line-height:1.55}
     </div>
     <div class="colbody">
       <div id="formView"><div class="pad">
+        <!-- B2：点「返回表单」后，若仍有任务在跑，这里给一条回去的路。
+             否则 S.runId 被清空、又没有任务列表，那个扫描就再也进不去、也停不掉，只能刷新页面。 -->
+        <div id="resumeBar" hidden style="display:flex;align-items:center;gap:9px;margin-bottom:13px;            padding:9px 11px;border-radius:8px;border:1px solid rgba(63,185,80,.4);            background:rgba(63,185,80,.08)">
+          <span class="dot on live" aria-hidden="true"></span>
+          <span style="flex:1;font-size:11.5px;color:#7ee787" id="resumeText">任务在运行中</span>
+          <button type="button" id="btnResume" style="padding:3px 10px;font-size:10.5px">回到日志</button>
+        </div>
         <div class="f">
           <label for="kw">关键词 <span class="hint">搜索的种子</span></label>
           <textarea id="kw" placeholder="vector database, 向量检索, embedding store&#10;逗号或换行分隔 —— LLM 会把它扩写成一组 GitHub 搜索词"></textarea>
@@ -474,8 +483,12 @@ textarea{resize:vertical;font-family:inherit;line-height:1.55}
           <span class="dot" id="logDot"></span>
           <span id="logStatus">—</span>
           <span style="flex:1"></span>
-          <button class="danger" id="btnStop" style="padding:3px 11px;font-size:10.5px">停止</button>
+          <button class="danger" id="btnStop" style="padding:3px 11px;font-size:10.5px" disabled>停止</button>
         </div>
+        <!-- B3：日志视图自己的提示槽。#formMsg 在 #formView 里，而日志视图下那个容器是
+             display:none —— 停止失败的错误写进去用户根本看不见（第二轮审计实测 offsetParent=null）。
+             所以运行相关的反馈必须放在这里。 -->
+        <div class="msg" id="logMsg" style="margin:8px 12px 10px"></div>
         <div class="logbody" id="logBody"></div>
       </div>
     </div>
@@ -573,7 +586,10 @@ var S = {
   ghOk: false,
   lastLlm: null,       // 最近一次后端返回的 LLM 配置，用于关闭弹窗时还原
   apiDirty: false,     // 用户在弹窗里改过东西 —— 期间禁止 tick 回写输入框
-  suppressAdopt: false // 用户主动点了「返回表单」，别被 tick 又拉回去
+  suppressAdopt: false, // 用户主动点了「返回表单」，别被 tick 又拉回去
+  starting: false,      // 正在 POST /api/runs —— 期间别让 tick 把按钮点亮（防双提交）
+  saving: false,        // 正在保存 LLM 配置
+  staleBefore: 0        // 早于此时刻发出的 /api/state 响应一律作废（防旧值覆盖刚保存的配置）
 };
 
 function $(id){ return document.getElementById(id); }
@@ -637,7 +653,8 @@ function paintGitHub(g){
 function paintLLM(l){
   if (!l) return;
   S.llmOk = !!l.configured;
-  S.lastLlm = l;
+  // B7：正在编辑或保存时，不要把可能陈旧的响应记成"已保存值"
+  if (!S.apiDirty && !S.saving) S.lastLlm = l;
 
   /*
     【关键】只有用户没在编辑时才回写输入框。
@@ -649,13 +666,20 @@ function paintLLM(l){
     $("llmModel").value = l.model || "";
   }
   $("keyHint").textContent = l.apiKeyMasked ? "已保存 " + l.apiKeyMasked : "未保存";
-  $("btnStart").disabled = !l.configured;
+  // 既有问题 2：正在提交时不能被 tick 重新点亮，否则慢响应期间会发第二个 POST
+  $("btnStart").disabled = !l.configured || S.starting;
 
   /*
     未配置提示改用独立元素 #llmWarn，不再借用 formMsg。
     原来只 show 不 hide：保存成功后左侧黄色警告会一直挂着，和"开始查询"已点亮自相矛盾。
+
+    【第二轮审计抓到的回归】只切 hidden 是不够的：.msg 的基础样式是 display:none，
+    只有 .msg.on 才 display:block。所以 hidden=false 但元素仍然看不见 ——
+    "永不隐藏"被我改成了"永不显示"。必须同时 toggle .on。
   */
-  $("llmWarn").hidden = !!l.configured;
+  var warn = $("llmWarn");
+  warn.hidden = !!l.configured;
+  warn.classList.toggle("on", !l.configured);
 }
 
 function showMsg(id, cls, text){
@@ -697,7 +721,7 @@ function renderStats(run){
 function renderGhost(){
   var g = $("ghost");
   if (S.running){ g.textContent = "搜索中"; g.className = "live"; }
-  else if (S.stopping){ g.textContent = "停止中"; g.className = "live"; }
+  else if (S.stopping){ g.textContent = "停止中"; g.className = "warn"; }
   else if (S.status === "done"){ g.textContent = "搜索完毕"; g.className = "done"; }
   else if (S.status === "failed"){ g.textContent = "搜索失败"; g.className = "fail"; }
   else if (S.status === "stopped"){ g.textContent = "已停止"; g.className = ""; }
@@ -762,9 +786,13 @@ function renderHist(hist){
 function renderResults(rows){
   var box = $("results");
   if (!rows || !rows.length){
-    box.innerHTML = S.running
+    /* B5：用 S.active 而不是 S.running —— 停止中也不该显示「还没有结果，去填表」的闲置文案 */
+    var _tip = S.running
       ? '<div class="empty"><span class="ico">⌛</span><b>正在搜索…</b>还没有达标的项目<br><span style="font-size:11px;color:var(--faint)">达标项目会在这里逐个出现</span></div>'
-      : '<div class="empty"><span class="ico">◎</span><b>还没有结果</b>在左侧填写关键词与查询目标，然后开始查询</div>';
+      : (S.stopping
+        ? '<div class="empty"><span class="ico">⏸</span><b>正在停止…</b>已发出的请求会跑完</div>'
+        : '<div class="empty"><span class="ico">◎</span><b>还没有结果</b>在左侧填写关键词与查询目标，然后开始查询</div>');
+    box.innerHTML = _tip;
     return;
   }
   var h = "", i, r, sc;
@@ -872,6 +900,9 @@ function setRunState(run, running){
     状态仍是 running 但没有句柄，值为 false。用它驱动 UI 会让正在跑的任务
     显示成灰点+待命+停止按钮禁用，长跑任务根本没法从界面停。
   */
+  // 让 S.runId 与实际显示的 run 保持一致 —— 否则「返回表单」时记下的 keepId
+  // 可能还是上一轮遗留的 id，resumeBar 会指向一个错的任务。
+  if (run.id !== undefined && run.id !== null) S.runId = Number(run.id);
   S.status = st;
   S.running = (st === "running");
   S.stopping = (st === "stopping");
@@ -897,7 +928,12 @@ function setRunState(run, running){
          : (run.status || "—");
   $("logStatus").textContent = "任务 #" + run.id + " · " + st
     + (run.stop_reason ? " · " + run.stop_reason : "");
-  $("btnStop").disabled = !S.active;   // running 与 stopping 都应禁用：已经请求过了
+    /*
+    B4：只在真正 running 时可点。stopping 说明用户已经请求过停止，
+    再点一次只会重复 POST /stop。原来写成 !S.active，而 S.active 包含 stopping，
+    于是状态一变 stopping，按钮又被点亮 —— 注释和代码自相矛盾。
+  */
+  $("btnStop").disabled = !S.running;
 }
 
 /*
@@ -906,10 +942,16 @@ function setRunState(run, running){
   这样刷新页面或换设备打开，都能直接看到正在进行的扫描，而不是回到空表单。
 */
 function tick(){
+  var t0 = Date.now();   // 记下发请求的时刻，用于判定响应是否已经过期
   api("/api/state").then(function(st){
     if (!st || !st.ok) return;
     paintGitHub(st.github);
-    paintLLM(st.llm);
+    /*
+      B7：保存配置之后，可能还有若干个「保存之前发出」的 /api/state 响应在飞。
+      它们带的是旧配置，落到 paintLLM 就会把刚保存的新值盖回去，直到下个 tick 才恢复。
+      用发请求时刻与 staleBefore 比较即可丢弃。
+    */
+    if (t0 >= S.staleBefore) paintLLM(st.llm);
     /*
       自动接管正在跑的任务 —— 但【只在用户没主动退出时】。
       原来无条件下，点「返回表单」后 2 秒就被拉回日志，那个按钮等于没用。
@@ -954,8 +996,10 @@ function pollRun(){
 
 /* ---------------- 交互 ---------------- */
 $("advToggle").onclick = function(){
-  this.classList.toggle("open");
+  var open = this.classList.toggle("open");
   $("advBox").classList.toggle("open");
+  // B6：aria-expanded 必须跟着变，否则屏幕阅读器永远读「已折叠」
+  this.setAttribute("aria-expanded", String(open));
 };
 
 /*
@@ -985,12 +1029,14 @@ $("btnStart").onclick = function(){
     maxAgeDays: Number($("maxAge").value) || 0
   };
   var btn = this;
+  S.starting = true;              // 防双提交：tick 里的 paintLLM 会尊重这个标志
   btn.disabled = true; btn.textContent = "启动中…";
   api("/api/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   }).then(function(r){
+    S.starting = false;
     btn.disabled = false; btn.textContent = "开始查询";
     if (!r || !r.ok){
       showMsg("formMsg", "bad", (r && r.error) || "创建任务失败");
@@ -998,14 +1044,26 @@ $("btnStart").onclick = function(){
     }
     S.runId = r.run.id;
     S.suppressAdopt = false;
+    $("resumeBar").hidden = true;
     S.running = true; S.ended = false;
     showLog();
     $("logBody").innerHTML = "";
     pollRun();
   }).catch(function(e){
+    S.starting = false;
     btn.disabled = false; btn.textContent = "开始查询";
     showMsg("formMsg", "bad", "请求失败：" + e.message);
   });
+};
+
+$("btnResume").onclick = function(){
+  var id = Number(this.parentNode.getAttribute("data-run") || 0);
+  if (!id) return;
+  S.suppressAdopt = false;
+  S.runId = id;
+  this.parentNode.hidden = true;
+  showLog();
+  pollRun();
 };
 
 $("btnStop").onclick = function(){
@@ -1014,23 +1072,51 @@ $("btnStop").onclick = function(){
   btn.disabled = true;
   hideMsg("formMsg");
   api("/api/runs/" + S.runId + "/stop", { method: "POST" }).then(function(r){
-    if (r && r.ok){ pollRun(); return; }
-    // 停止失败必须说出来 —— 原来这里静默，用户以为已经停了
+    if (r && r.ok){ hideMsg("logMsg"); pollRun(); return; }
+    // 停止失败必须说出来，而且要写在【日志视图看得见的地方】
     btn.disabled = false;
-    showMsg("formMsg", "bad", "停止失败：" + ((r && r.error) || "服务端返回失败"));
+    showMsg("logMsg", "bad", "停止失败：" + ((r && r.error) || "服务端返回失败"));
   }).catch(function(e){
     btn.disabled = false;
-    showMsg("formMsg", "bad", "停止请求失败：" + e.message);
+    showMsg("logMsg", "bad", "停止请求失败：" + e.message);
   });
 };
 
 $("btnBack").onclick = function(){
+  /*
+    B2：不能只清 runId 就走人 —— 那样中央区会残留上一个任务的状态：
+    流光条还在跑、统计还是旧数字、结果区还写着「正在搜索…」，而大字已经变成「待命」，
+    自相矛盾。这里把运行视图整体复位，同时保留一条 resumeBar 让人能回去。
+  */
+  var stillRunning = S.running || S.stopping;
+  var keepId = S.runId;
+
   S.runId = null;
   S.running = false; S.stopping = false; S.active = false; S.ended = false; S.status = "";
-  S.suppressAdopt = true;      // 直到用户新建任务或手动选任务，否则 tick 别再拉我回去
+  S.suppressAdopt = true;      // 直到用户新建任务或点 resume，否则 tick 别再拉我回去
+
   showForm();
   $("logBody").innerHTML = "";
+  hideMsg("logMsg");
+  $("runbar").className = "";
+  $("logDot").className = "dot";
+  $("logStatus").textContent = "—";
+  $("btnStop").disabled = true;
+  renderStats({ qualified: 0, scored: 0, scanned: 0 });
+  renderHist(null);
+  renderResults([]);
+  renderKeywords([]);
   renderGhost();
+
+  // 任务还在跑就留一条回去的路
+  if (stillRunning && keepId){
+    $("resumeText").textContent = "任务 #" + keepId + " 仍在运行（未停止）";
+    $("resumeBar").hidden = false;
+    $("resumeBar").setAttribute("data-run", String(keepId));
+  } else {
+    $("resumeBar").hidden = true;
+    $("resumeBar").removeAttribute("data-run");
+  }
 };
 
 /* ---------------- 接入 API ---------------- */
@@ -1060,8 +1146,10 @@ function closeApi(){
   */
   $("llmKey").value = "";
   S.apiDirty = false;
-  if (S.lastLlm) paintLLM(S.lastLlm);
+  S.saving = false;
+  // B7：不再拿 S.lastLlm 回写（那份可能是陈旧响应记下的），直接向服务端要一次真值
   $("btnApi").focus();      // 焦点回到触发按钮，键盘用户不会迷失
+  tick();
 }
 $("apiClose").onclick = closeApi;
 $("apiCancel").onclick = closeApi;
@@ -1092,7 +1180,12 @@ $("btnTest").onclick = function(){
   var btn = this;
   btn.disabled = true; btn.textContent = "测试中…";
   showMsg("apiMsg", "info", "正在用当前配置发一次真实请求…");
-  var payload = { baseUrl: $("llmBase").value.trim(), model: $("llmModel").value.trim() };
+  /*
+    测试连通带 dryRun:true —— 只装进内存让服务端用它发一次请求，不落盘。
+    原来这里先 POST /api/llm 会直接 saveJson：测试失败（比如 401）时坏地址已经被持久化，
+    旧配置丢了，下次扫描就会拿坏地址去跑。
+  */
+  var payload = { baseUrl: $("llmBase").value.trim(), model: $("llmModel").value.trim(), dryRun: true };
   var k = $("llmKey").value.trim();
   if (k) payload.apiKey = k;
   api("/api/llm", {
@@ -1120,8 +1213,11 @@ $("apiSave").onclick = function(){
   }).then(function(r){
     btn.disabled = false;
     if (r && r.ok){
+      // B7：此刻之前发出的 /api/state 响应都作废，否则会把新值盖回旧的
+      S.staleBefore = Date.now();
+      S.apiDirty = false;
       showMsg("apiMsg", "ok", "已保存。");
-      paintLLM(r.llm);
+      paintLLM(r.llm);          // 用 POST 返回的新配置，不用缓存
       $("llmKey").value = "";
       setTimeout(closeApi, 800);
     } else {
