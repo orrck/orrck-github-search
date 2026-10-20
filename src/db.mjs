@@ -110,14 +110,20 @@ export class Store {
   // ---------------------------------------------------------------- runs
   createRun(r) {
     const t = now();
+    /*
+      【第四轮盲审】门槛默认值必须用「缺省才取默认」而不是 `||`。
+      `Number(r.threshold || 0.6)` 会把用户显式填的 0 变成 0.6 —— 而界面的输入框
+      允许 min=0，语义上「0 = 门槛不拦任何东西」。被悄悄改成 0.6/0.3 属于静默改需求。
+    */
+    const pick = (v, d) => (v === undefined || v === null || v === "") ? d : Number(v);
     const h = goalHash(r.goal, r);
     const info = this.db.prepare(`INSERT INTO runs(goal,goal_hash,keywords,mode,want_n,threshold,
         concurrency,funnel,coarse_threshold,min_stars,max_age_days,lang,max_hits,max_keywords,max_depth,
         status,started_at)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'running', ?)`).run(
       String(r.goal || ""), h, String(r.keywords || ""), r.mode === "auto" ? "auto" : "target",
-      Number(r.wantN || 20), Number(r.threshold || 0.6), Number(r.concurrency || 3),
-      r.funnel ? 1 : 0, Number(r.coarseThreshold || 0.3), Number(r.minStars || 0),
+      Number(r.wantN || 20), pick(r.threshold, 0.6), Number(r.concurrency || 3),
+      r.funnel ? 1 : 0, pick(r.coarseThreshold, 0.3), Number(r.minStars || 0),
       Number(r.maxAgeDays || 0), String(r.lang || ""), Number(r.maxHits || 0),
       Number(r.maxKeywords || 200), Number(r.maxDepth || 2), t);
     const id = Number(info.lastInsertRowid);

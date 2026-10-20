@@ -980,6 +980,7 @@ function tick(){
         if (Number(rr[ri].id) === barId){ found = rr[ri]; break; }
       }
       var barSt = found ? found.status : "";
+      if (barSt) bar.setAttribute("data-status", barSt);
       if (barSt === "running"){
         $("resumeText").textContent = "任务 #" + barId + " 仍在运行（未停止）";
         bar.style.borderColor = "rgba(63,185,80,.4)";
@@ -1012,7 +1013,21 @@ function tick(){
       for (i = 0; i < runs.length; i++){
         if (runs[i].status === "running" || runs[i].status === "stopping"){ live = runs[i]; break; }
       }
-      if (live){ S.runId = live.id; showLog(); }
+      if (live){
+        /*
+          C1：这里必须把运行态标志一起同步。原来只设 S.runId，
+          结果 btnBack 用「旧」的 S.running 判断"是否还有任务在跑"，得到 false，
+          于是不显示 resumeBar、又把 suppressAdopt 置真 —— 那个任务在界面上
+          就永久消失了（既进不去日志，也停不掉），只能刷新页面。
+        */
+        S.runId = live.id;
+        S.status = live.status;
+        S.running = live.status === "running";
+        S.stopping = live.status === "stopping";
+        S.active = S.running || S.stopping;
+        $("resumeBar").setAttribute("data-status", live.status);
+        showLog();
+      }
     }
     if (S.runId) pollRun();
   }).catch(function(){});
@@ -1118,12 +1133,19 @@ $("btnStart").onclick = function(){
 };
 
 $("btnResume").onclick = function(){
-  var id = Number(this.parentNode.getAttribute("data-run") || 0);
+  var bar = this.parentNode;
+  var id = Number(bar.getAttribute("data-run") || 0);
   if (!id) return;
   S.suppressAdopt = false;
   S.runId = id;
+  // C1：resume 时也要把状态带上，否则紧接着点「返回表单」又会判定"没在跑"
+  var stt = bar.getAttribute("data-status") || "running";
+  S.status = stt;
+  S.running = stt === "running";
+  S.stopping = stt === "stopping";
+  S.active = S.running || S.stopping;
   S.pollEpoch++;
-  this.parentNode.hidden = true;
+  bar.hidden = true;
   showLog();
   pollRun();
 };
@@ -1171,14 +1193,30 @@ $("btnBack").onclick = function(){
   renderKeywords([]);
   renderGhost();
 
-  // 任务还在跑就留一条回去的路
-  if (stillRunning && keepId){
-    $("resumeText").textContent = "任务 #" + keepId + " 仍在运行（未停止）";
+  /*
+    C1 双保险：只要刚才在看的那个 run 存在，就给一条回去的路 ——
+    不再依赖 stillRunning。否则「自动接管后第一次 /api/runs 还没回来就点返回」
+    这种时序下 stillRunning 是旧值 false，任务会永久消失。
+  */
+  if (keepId){
+    var _st = S.status || "running";
     $("resumeBar").hidden = false;
     $("resumeBar").setAttribute("data-run", String(keepId));
+    $("resumeBar").setAttribute("data-status", _st);
+    if (_st === "running"){
+      $("resumeText").textContent = "任务 #" + keepId + " 仍在运行（未停止）";
+      $("btnResume").textContent = "回到日志";
+    } else if (_st === "stopping"){
+      $("resumeText").textContent = "任务 #" + keepId + " 正在停止…";
+      $("btnResume").textContent = "查看";
+    } else {
+      $("resumeText").textContent = "任务 #" + keepId + "（点查看日志）";
+      $("btnResume").textContent = "查看日志";
+    }
   } else {
     $("resumeBar").hidden = true;
     $("resumeBar").removeAttribute("data-run");
+    $("resumeBar").removeAttribute("data-status");
   }
 };
 
