@@ -69,7 +69,7 @@ function pushLog(runId, chunk) {
 function spawnScan(runId) {
   const prev = children.get(runId);
   const restarts = prev ? prev.restarts + 1 : 0;
-  if (restarts > 200) { store.finishRun(runId, "重启次数过多，放弃"); return; }
+  if (restarts > 200) { store.finishRun(runId, "重启次数过多，放弃", "failed"); return; }
   // detached: 让扫描进程自成一个进程组。
   // 否则服务端收到 SIGINT/SIGTERM 时会连带把扫描一起带走
   //（终端 Ctrl+C、systemd 默认 KillMode=control-group 都是这个行为），
@@ -92,7 +92,9 @@ function spawnScan(runId) {
     }
     if (run.status === "running") {
       pushLog(runId, "── 扫描进程退出 code=" + code + " signal=" + (signal || "-"));
-      store.finishRun(runId, "扫描进程退出（code " + code + "）");
+      // 退出码 0 = 正常收工但没自己写终态（极少见），其余一律算异常。
+      // 用 failed 而不是 stopped，前端才会画红点 —— 「崩了」和「手动停」不该同色。
+      store.finishRun(runId, "扫描进程退出（code " + code + "）", code === 0 ? "done" : "failed");
     } else {
       pushLog(runId, "── 扫描进程退出（正常收工）");
     }

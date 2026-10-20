@@ -169,8 +169,21 @@ export class Store {
     return now() - Number(r.last_tick) > Number(staleMs || 180000);
   }
 
-  finishRun(id, reason) {
-    this.patchRun(id, { status: "stopped", stop_reason: reason || "", ended_at: now() });
+  /**
+   * 收尾。status 决定前端画什么颜色 —— 这是三种【语义不同】的结局：
+   *   done    跑到了目标 / 前沿枯竭 / 测试上限 —— 正常结束，前端绿点「已完成」
+   *   failed  进程异常退出 / 重启失控 —— 前端红点「失败」
+   *   stopped 用户手动停 / 服务重启收尾 —— 前端灰点「已停止」
+   * 历史遗留：早期只有 stopped 一种终态，导致前端 done/failed 两个分支是死代码，
+   * 「凑够了 20 个」和「扫描进程崩了」在界面上长得一模一样。
+   * 默认 stopped 是为了兼容旧调用点（reapStaleRuns 等）不必全改。
+   */
+  finishRun(id, reason, status) {
+    this.patchRun(id, {
+      status: status || "stopped",
+      stop_reason: reason || "",
+      ended_at: now(),
+    });
   }
 
   /** 扫描子进程每轮开头问一次：还是 running 就继续，否则收工退出。 */

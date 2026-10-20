@@ -129,7 +129,7 @@ async function main() {
   {
     const have = store.countHits(run.id);
     if (run.mode === "target" && have >= Number(run.want_n)) {
-      store.finishRun(run.id, "分数缓存里已有 " + have + " 个达标项目，已达目标 " + run.want_n + "，无需搜索");
+      store.finishRun(run.id, "分数缓存里已有 " + have + " 个达标项目，已达目标 " + run.want_n + "，无需搜索", "done");
       log("开局即达标：缓存 " + have + " ≥ 目标 " + run.want_n + "，不扩词、不搜索、不花额度");
       store.close();
       return;
@@ -190,16 +190,16 @@ async function main() {
       break;
     }
     if (run.mode === "target" && store.countHits(run.id) >= Number(run.want_n)) {
-      await flush(buf); store.finishRun(run.id, "已凑够 " + run.want_n + " 个达标项目"); log("达标停止"); break;
+      await flush(buf); store.finishRun(run.id, "已凑够 " + run.want_n + " 个达标项目", "done"); log("达标停止"); break;
     }
-    if (opt.maxProjects > 0 && sinceRecycle >= opt.maxProjects) { await flush(buf); store.finishRun(run.id, "达到测试上限"); log("测试上限"); break; }
+    if (opt.maxProjects > 0 && sinceRecycle >= opt.maxProjects) { await flush(buf); store.finishRun(run.id, "达到测试上限", "done"); log("测试上限"); break; }
     if (sinceRecycle >= RECYCLE_AFTER) { await flush(buf); store.patchRun(run.id, { pid: 0 }); log("回收子进程（已处理 " + sinceRecycle + " 个项目），退出码 " + EXIT_RECYCLE); store.close(); process.exit(EXIT_RECYCLE); }
 
     const kw = store.nextKeyword(run.id);
     if (!kw) {
       // 前沿枯竭 → 让 LLM 基于已有产出再扩一轮新词
       const added = await expandKeywords(run, store, llm, log, false);
-      if (!added) { await flush(buf); store.finishRun(run.id, "前沿枯竭：扩词也扩不出新词了"); log("前沿枯竭，退出"); break; }
+      if (!added) { await flush(buf); store.finishRun(run.id, "前沿枯竭：扩词也扩不出新词了", "done"); log("前沿枯竭，退出"); break; }
       log("前沿枯竭 → 又扩出 " + added + " 个新词");
       continue;
     }
@@ -245,13 +245,13 @@ async function main() {
     store.keywordYield(run.id, kw.q, admitted);
     store.bumpRun(run.id, { scanned: admitted });
     await flush(buf);
-    if (stopEarly === "target") { store.finishRun(run.id, "已凑够 " + run.want_n + " 个达标项目"); log("达标停止（页内提前刹车，没白评剩下的）"); break; }
-    if (stopEarly === "limit") { store.finishRun(run.id, "达到测试上限"); log("测试上限 " + opt.maxProjects); break; }
+    if (stopEarly === "target") { store.finishRun(run.id, "已凑够 " + run.want_n + " 个达标项目", "done"); log("达标停止（页内提前刹车，没白评剩下的）"); break; }
+    if (stopEarly === "limit") { store.finishRun(run.id, "达到测试上限", "done"); log("测试上限 " + opt.maxProjects); break; }
 
     if (admitted === 0 && filtered === page.items.length) idleRounds++;
     else idleRounds = 0;
-    if (idleRounds > 60) { store.finishRun(run.id, "连续 60 页全被过滤器挡掉，没有新项目可评"); log("空转停止"); break; }
-    if (opt.once) { store.finishRun(run.id, "单轮测试结束"); break; }
+    if (idleRounds > 60) { store.finishRun(run.id, "连续 60 页全被过滤器挡掉，没有新项目可评", "done"); log("空转停止"); break; }
+    if (opt.once) { store.finishRun(run.id, "单轮测试结束", "done"); break; }
   }
 
   clearInterval(hb);

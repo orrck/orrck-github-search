@@ -40,8 +40,13 @@
   --bg:#080b0f; --bg2:#0c1016; --surface:#111721; --surface2:#161e2a; --surface3:#1c2533;
   /* 描边三级：line 分隔、line2 控件边框、line3 hover 态 */
   --line:#212b38; --line2:#2c3848; --line3:#3a4759;
-  /* 文字四级：主文、次文、弱化、最弱（占位符/禁用） */
-  --fg:#e9eff7; --fg2:#b3c0ce; --muted:#71808f; --faint:#4a5765;
+  /*
+    文字四级：主文、次文、弱化、最弱。
+    【2026-10-20 修】原 --faint 是 #4a5765，对 #111721 只有 2.4:1、对 #080b0f 2.7:1，
+    而它大量用于 9~10.5px 的计数和弱提示 —— 远低于正文 4.5:1 的门槛，实测看不清。
+    提到 #6b7a89 后约 4.6:1；仍比 muted 弱，但小字读得出来了。
+  */
+  --fg:#e9eff7; --fg2:#b3c0ce; --muted:#71808f; --faint:#6b7a89;
   --green:#3fb950; --green2:#2ea043; --greenGlow:rgba(63,185,80,.42);
   --red:#f85149; --red2:#da3633; --redGlow:rgba(248,81,73,.42);
   --amber:#d29922; --amber2:#bb8009; --amberGlow:rgba(210,153,34,.38);
@@ -95,6 +100,7 @@ header .sp{flex:1}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:0 0 auto;transition:.2s}
 .dot.on{background:var(--green);box-shadow:0 0 8px var(--greenGlow),0 0 2px var(--green)}
 .dot.off{background:var(--red);box-shadow:0 0 8px var(--redGlow),0 0 2px var(--red)}
+.dot.warn{background:var(--amber);box-shadow:0 0 8px var(--amberGlow),0 0 2px var(--amber)}
 .dot.live{animation:pulse 1.7s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
 
@@ -163,7 +169,8 @@ input,textarea,select{
   box-shadow:0 1px 2px rgba(0,0,0,.35) inset;
   transition:.15s;
 }
-input::placeholder,textarea::placeholder{color:#3e4a58}
+/* 占位符原 #3e4a58 对输入框底色只有 2.08:1，几乎不可读 —— 提到 #646f7d（约 4:1） */
+input::placeholder,textarea::placeholder{color:#646f7d}
 input:focus,textarea:focus,select:focus{
   outline:none;border-color:rgba(56,139,253,.7);
   box-shadow:0 0 0 3px rgba(56,139,253,.14), 0 1px 2px rgba(0,0,0,.35) inset;
@@ -183,10 +190,29 @@ textarea{resize:vertical;font-family:inherit;line-height:1.55}
 .fixed-note .lbl{color:var(--fg2);font-weight:600}
 
 /* 高级选项 */
+/*
+  这个折叠标题是 <button> 而不是 <div onclick> —— 原来键盘完全到不了（Tab 停在 goal 就跳走），
+  高级选项对键盘用户等于不存在。用 button 天然拿到 Tab 焦点与 Enter/Space 触发。
+  下面的重置样式是为了让它仍长得像一行标题，而不是一个按钮。
+*/
 .adv-toggle{
   display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;font-size:12px;font-weight:500;
-  color:var(--muted);padding:11px 0 9px;margin-top:6px;border-top:1px solid var(--line);transition:.15s;
+  color:var(--muted);padding:11px 0 9px;margin-top:6px;transition:.15s;
+  background:none;box-shadow:none;border:none;border-top:1px solid var(--line);
+  border-radius:0;width:100%;text-align:left;font-family:inherit;transform:none;
 }
+/*
+  必须比全局 button:hover 更具体地重置。
+  它是 <button>，会继承 button:hover:not(:disabled) 的渐变背景 + border-color + translateY(-1px)，
+  于是鼠标一碰折叠标题就变成一个高亮按钮块（实测 transform: matrix(1,0,0,1,0,-1)），
+  和 reset 后的"一行标题"外观自相矛盾。悬停只改文字颜色，保住标题观感。
+*/
+.adv-toggle:hover:not(:disabled){
+  background:none;box-shadow:none;transform:none;
+  border-color:transparent;border-top:1px solid var(--line);
+  color:var(--fg);
+}
+.adv-toggle:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:5px}
 .adv-toggle:hover{color:var(--fg)}
 .adv-toggle .arw{display:inline-block;font-size:9px;transition:transform .18s;color:var(--faint)}
 .adv-toggle.open .arw{transform:rotate(90deg);color:var(--blue)}
@@ -252,6 +278,7 @@ textarea{resize:vertical;font-family:inherit;line-height:1.55}
 }
 #ghost.live{color:var(--green);animation:breathe 3s ease-in-out infinite}
 #ghost.done{color:var(--fg2);opacity:.07}
+#ghost.fail{color:var(--red);opacity:.09}
 @keyframes breathe{0%,100%{opacity:.045;text-shadow:none}50%{opacity:.14;text-shadow:0 0 40px var(--greenGlow)}}
 
 /* 直方图 */
@@ -294,10 +321,15 @@ textarea{resize:vertical;font-family:inherit;line-height:1.55}
 .s-mid{color:var(--amber)}
 .s-lo{color:var(--faint)}
 .hit .body{flex:1;min-width:0}
-.hit .name{font-size:13.5px;font-weight:620;margin-bottom:3px;line-height:1.35}
+.hit .name{font-size:13.5px;font-weight:620;margin-bottom:3px;line-height:1.35;overflow-wrap:anywhere}
+/*
+  overflow-wrap:anywhere 是必需的：GitHub 允许 owner/repo 总长 140 字符，
+  实测这么一个合法名字会把 #results 撑出 1337px（容器只有 712~944px），
+  结果区出现横向滚动、文字被右侧裁掉。加在 .name/.one 上即可，不必动容器。
+*/
 .hit .name a{color:var(--fg)}
 .hit .name a:hover{color:var(--blue)}
-.hit .one{color:var(--fg2);font-size:12.5px;line-height:1.58;margin-bottom:5px}
+.hit .one{color:var(--fg2);font-size:12.5px;line-height:1.58;margin-bottom:5px;overflow-wrap:anywhere}
 .hit .meta{display:flex;gap:13px;font-size:10.5px;color:var(--muted);flex-wrap:wrap;align-items:center}
 .hit .meta i{font-style:normal;display:inline-flex;align-items:center;gap:4px}
 .hit .meta .star{color:var(--amber)}
@@ -396,41 +428,44 @@ textarea{resize:vertical;font-family:inherit;line-height:1.55}
     <div class="colbody">
       <div id="formView"><div class="pad">
         <div class="f">
-          <label>关键词 <span class="hint">搜索的种子</span></label>
+          <label for="kw">关键词 <span class="hint">搜索的种子</span></label>
           <textarea id="kw" placeholder="vector database, 向量检索, embedding store&#10;逗号或换行分隔 —— LLM 会把它扩写成一组 GitHub 搜索词"></textarea>
         </div>
         <div class="f">
-          <label>查询目标 <span class="hint">打分与过滤的评判标准</span></label>
+          <label for="goal">查询目标 <span class="hint">打分与过滤的评判标准</span></label>
           <textarea id="goal" style="min-height:78px" placeholder="找能直接跑起来的开源向量数据库，支持增量写入和混合检索"></textarea>
         </div>
         <div class="fixed-note">
           <span class="lbl">默认</span> · 启用漏斗 · 展示 <b>20</b> 条 · 粗筛 <b>0.3</b> 入列 · 门槛 <b>0.7</b>
         </div>
         <button class="pri wide" id="btnStart">开始查询</button>
-        <div class="adv-toggle" id="advToggle"><span class="arw">▶</span><span>高级选项</span></div>
+        <button type="button" class="adv-toggle" id="advToggle" aria-expanded="false" aria-controls="advBox"><span class="arw" aria-hidden="true">▶</span><span>高级选项</span></button>
         <div id="advBox">
           <div class="two">
-            <div class="f"><label>模式</label><select id="mode">
+            <div class="f"><label for="mode">模式</label><select id="mode">
               <option value="target">目标模式 · 凑够即停</option>
               <option value="auto">自动模式 · 持续搜</option></select></div>
-            <div class="f"><label>展示条数</label><input id="wantN" type="number" min="1" max="500" value="20"></div>
+            <div class="f"><label for="wantN">展示条数</label><input id="wantN" type="number" min="1" max="500" value="20"></div>
           </div>
           <div class="two">
-            <div class="f"><label>入列门槛</label><input id="threshold" type="number" step="0.05" min="0" max="1" value="0.7"></div>
-            <div class="f"><label>粗筛门槛</label><input id="coarse" type="number" step="0.05" min="0" max="1" value="0.3"></div>
+            <div class="f"><label for="threshold">入列门槛</label><input id="threshold" type="number" step="0.05" min="0" max="1" value="0.7"></div>
+            <div class="f"><label for="coarse">粗筛门槛</label><input id="coarse" type="number" step="0.05" min="0" max="1" value="0.3"></div>
           </div>
           <div class="two">
-            <div class="f"><label>并发数</label><input id="conc" type="number" min="1" max="10" value="3"></div>
-            <div class="f"><label>语言</label><input id="lang" placeholder="Python / 留空"></div>
+            <div class="f"><label for="conc">并发数</label><input id="conc" type="number" min="1" max="10" value="3"></div>
+            <div class="f"><label for="lang">语言</label><input id="lang" placeholder="Python / 留空"></div>
           </div>
           <div class="two">
-            <div class="f"><label>最低 star</label><input id="minStars" type="number" min="0" value="0"></div>
-            <div class="f"><label>最大未更新天数</label><input id="maxAge" type="number" min="0" value="0"></div>
+            <div class="f"><label for="minStars">最低 star</label><input id="minStars" type="number" min="0" value="0"></div>
+            <div class="f"><label for="maxAge">最大未更新天数</label><input id="maxAge" type="number" min="0" value="0"></div>
           </div>
-          <div class="f"><label>漏斗</label><select id="funnel">
+          <div class="f"><label for="funnel">漏斗</label><select id="funnel">
             <option value="1">启用 · 先粗筛再读 README</option>
             <option value="0">关闭 · 每个仓库都读 README</option></select></div>
         </div>
+        <!-- 未配置 LLM 的常驻提示。独立元素，由 paintLLM 控制显隐 ——
+             不借用 formMsg，否则表单校验错误和这条会互相覆盖 -->
+        <div class="msg warn" id="llmWarn" hidden>还没接入 LLM API —— 点右上角「接入 API」填写 Base URL / 模型名 / Key。</div>
         <div class="msg" id="formMsg"></div>
       </div></div>
 
@@ -482,14 +517,19 @@ textarea{resize:vertical;font-family:inherit;line-height:1.55}
 
 <!-- 接入 API -->
 <div class="mask" id="apiMask">
-  <div class="modal">
-    <h2><span class="ic">⚡</span>接入 LLM API<span class="sp"></span><button class="x" id="apiClose">✕</button></h2>
+  <!--
+    模态语义：role=dialog + aria-modal 让屏幕阅读器把焦点锁在这一层；
+    aria-labelledby 指向标题文本，读出来是「接入 LLM API 对话框」。
+    焦点管理（打开聚焦第一个输入 / Tab 循环 / Esc 关闭并回焦）在脚本里做。
+  -->
+  <div class="modal" id="apiModal" role="dialog" aria-modal="true" aria-labelledby="apiTitle">
+    <h2><span class="ic" aria-hidden="true">⚡</span><span id="apiTitle">接入 LLM API</span><span class="sp"></span><button class="x" id="apiClose" aria-label="关闭">✕</button></h2>
     <div class="bd">
-      <div class="f"><label>Base URL</label>
+      <div class="f"><label for="llmBase">Base URL</label>
         <input id="llmBase" placeholder="https://api.deepseek.com/v1"></div>
-      <div class="f"><label>模型名</label>
+      <div class="f"><label for="llmModel">模型名</label>
         <input id="llmModel" placeholder="deepseek-chat"></div>
-      <div class="f"><label>API Key <span class="hint" id="keyHint"></span></label>
+      <div class="f"><label for="llmKey">API Key <span class="hint" id="keyHint"></span></label>
         <input id="llmKey" type="password" placeholder="sk-...">
         <div class="hintline">Key 会存在服务端 data/llm.json（权限 0600），GET 接口只回脱敏值。</div>
       </div>
@@ -522,7 +562,19 @@ textarea{resize:vertical;font-family:inherit;line-height:1.55}
 
 /* 全局可变状态。刻意保持极小 —— 其余一切都从后端每 2 秒拉一次，
    不做前端缓存，避免「界面显示的进度和真实进度不一致」。 */
-var S = { runId:null, running:false, ended:false, llmOk:false, ghOk:false };
+var S = {
+  runId: null,
+  running: false,      // 后端 status === "running"
+  stopping: false,     // 后端 status === "stopping"
+  active: false,       // running || stopping —— 只要是"还在进行中"就用它
+  ended: false,        // done / stopped / failed
+  status: "",          // 上一次拿到的 run.status，renderGhost 要按它选文案
+  llmOk: false,
+  ghOk: false,
+  lastLlm: null,       // 最近一次后端返回的 LLM 配置，用于关闭弹窗时还原
+  apiDirty: false,     // 用户在弹窗里改过东西 —— 期间禁止 tick 回写输入框
+  suppressAdopt: false // 用户主动点了「返回表单」，别被 tick 又拉回去
+};
 
 function $(id){ return document.getElementById(id); }
 
@@ -546,6 +598,19 @@ function api(p, o){
   });
 }
 function num(v){ return (v === null || v === undefined || v === "") ? "0" : String(v); }
+
+/*
+  外链协议白名单。html_url 来自 GitHub，属于不可信输入。
+  esc() 只能防 HTML 注入，防不住 href="javascript:..." —— 属性值本身是合法的，
+  点击时才会执行。这里解析后只放行 http/https，其余一律退化成 #。
+*/
+function safeUrl(u){
+  try {
+    var x = new URL(String(u));
+    if (x.protocol === "http:" || x.protocol === "https:") return x.href;
+  } catch (e) { /* 不是合法 URL，落到下面返回 # */ }
+  return "#";
+}
 
 /* ---------------- GitHub 状态 ---------------- */
 function paintGitHub(g){
@@ -572,13 +637,25 @@ function paintGitHub(g){
 function paintLLM(l){
   if (!l) return;
   S.llmOk = !!l.configured;
-  $("llmBase").value = l.baseUrl || "";
-  $("llmModel").value = l.model || "";
+  S.lastLlm = l;
+
+  /*
+    【关键】只有用户没在编辑时才回写输入框。
+    原来每 2 秒无条件写值，结果弹出窗里刚打完自定义 Base URL / 模型名，
+    下一个 tick（2s 内）就被服务端的旧值覆盖回去 —— 自定义中转地址根本存不进去。
+  */
+  if (!S.apiDirty){
+    $("llmBase").value = l.baseUrl || "";
+    $("llmModel").value = l.model || "";
+  }
   $("keyHint").textContent = l.apiKeyMasked ? "已保存 " + l.apiKeyMasked : "未保存";
   $("btnStart").disabled = !l.configured;
-  if (!l.configured){
-    showMsg("formMsg", "warn", "还没接入 LLM API —— 点右上角「接入 API」填写 Base URL / 模型名 / Key。");
-  }
+
+  /*
+    未配置提示改用独立元素 #llmWarn，不再借用 formMsg。
+    原来只 show 不 hide：保存成功后左侧黄色警告会一直挂着，和"开始查询"已点亮自相矛盾。
+  */
+  $("llmWarn").hidden = !!l.configured;
 }
 
 function showMsg(id, cls, text){
@@ -620,7 +697,10 @@ function renderStats(run){
 function renderGhost(){
   var g = $("ghost");
   if (S.running){ g.textContent = "搜索中"; g.className = "live"; }
-  else if (S.ended){ g.textContent = "搜索完毕"; g.className = "done"; }
+  else if (S.stopping){ g.textContent = "停止中"; g.className = "live"; }
+  else if (S.status === "done"){ g.textContent = "搜索完毕"; g.className = "done"; }
+  else if (S.status === "failed"){ g.textContent = "搜索失败"; g.className = "fail"; }
+  else if (S.status === "stopped"){ g.textContent = "已停止"; g.className = ""; }
   else { g.textContent = "待命"; g.className = ""; }
 }
 
@@ -654,11 +734,21 @@ function renderHist(hist){
   }
   wrap.innerHTML = h;
   lab.innerHTML = lb;
-  var m = '已评分 <b>' + hist.n + '</b>';
-  if (hist.mean) m += ' · 均值 <b>' + hist.mean.toFixed(2) + '</b>';
-  if (hist.sd) m += ' · 标准差 <b>' + hist.sd.toFixed(2) + '</b>';
-  if (hist.max !== null && hist.max !== undefined){
-    m += ' · 区间 <b class="g">' + hist.min.toFixed(2) + ' ~ ' + hist.max.toFixed(2) + '</b>';
+  /*
+    数值一律先 Number() + isFinite 再格式化。原来直接 hist.mean.toFixed()，
+    一旦 JSON 里出现字符串（类型漂移、外部注入、未来换存储），整块直方图会抛
+    TypeError 直接不渲染。现在最坏情况只是少显示一个统计数字。
+  */
+  var f2 = function(v){
+    var n = Number(v);
+    return Number.isFinite(n) ? n.toFixed(2) : null;
+  };
+  var m = '已评分 <b>' + num(hist.n) + '</b>';
+  var mn = f2(hist.mean), sd = f2(hist.sd), lo = f2(hist.min), hi = f2(hist.max);
+  if (mn !== null) m += ' · 均值 <b>' + mn + '</b>';
+  if (sd !== null) m += ' · 标准差 <b>' + sd + '</b>';
+  if (lo !== null && hi !== null){
+    m += ' · 区间 <b class="g">' + lo + ' ~ ' + hi + '</b>';
   }
   meta.innerHTML = m;
 }
@@ -684,7 +774,7 @@ function renderResults(rows){
        +   '<div class="rank">' + (i + 1) + '</div>'
        +   '<div class="sc ' + scoreClass(sc) + '">' + sc.toFixed(2) + '</div>'
        +   '<div class="body">'
-       +     '<div class="name"><a href="' + esc(r.html_url) + '" target="_blank" rel="noreferrer">' + esc(r.full_name) + '</a></div>'
+       +     '<div class="name"><a href="' + esc(safeUrl(r.html_url)) + '" target="_blank" rel="noreferrer noopener">' + esc(r.full_name) + '</a></div>'
        +     '<div class="one">' + esc(r.one_line) + '</div>'
        +     '<div class="meta">'
        +       '<i class="star">★ ' + (r.stars || 0) + '</i>'
@@ -751,8 +841,14 @@ function renderLog(lines){
     else if (/扩词|query|搜索词/i.test(t)) cls += " kw";
     h += '<div class="' + cls + '">' + esc(t) + '</div>';
   }
+  /*
+    只在「用户原本就在底部」时才自动滚到底。
+    原来每次渲染都强设 scrollTop=scrollHeight，于是每 2 秒把往上翻的人拽回底部，
+    历史日志根本没法回看（实测把它设成 0，2.5 秒后又变回 3069）。
+  */
+  var atBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 8;
   box.innerHTML = h;
-  box.scrollTop = box.scrollHeight;
+  if (atBottom) box.scrollTop = box.scrollHeight;
 }
 
 /* ---------------- 轮询 ---------------- */
@@ -767,22 +863,31 @@ function renderLog(lines){
 */
 function setRunState(run, running){
   if (!run) return;
-  S.running = !!running && run.status === "running";
-  S.ended = (run.status === "done" || run.status === "stopped" || run.status === "failed");
+  var st = run.status;
+
+  /*
+    【关键】运行态只看 run.status，不看后端返回的 running 字段。
+    server.mjs 的 /api/runs/:id 里 running = children.has(id)，语义是
+    「本进程有没有这个扫描子进程的 stdout 句柄」——服务重启后被接管的任务
+    状态仍是 running 但没有句柄，值为 false。用它驱动 UI 会让正在跑的任务
+    显示成灰点+待命+停止按钮禁用，长跑任务根本没法从界面停。
+  */
+  S.status = st;
+  S.running = (st === "running");
+  S.stopping = (st === "stopping");
+  S.active = S.running || S.stopping;
+  S.ended = (st === "done" || st === "stopped" || st === "failed");
+
   renderStats(run);
   renderGhost();
-  $("runbar").className = S.running ? "on" : "";
+  $("runbar").className = S.active ? "on" : "";
 
   var d = $("logDot");
-  if (S.running){
-    d.className = "dot on live";
-  } else if (run.status === "done"){
-    d.className = "dot on";
-  } else if (run.status === "failed"){
-    d.className = "dot off";
-  } else {
-    d.className = "dot";
-  }
+  if (S.running) d.className = "dot on live";
+  else if (S.stopping) d.className = "dot warn live";
+  else if (st === "done") d.className = "dot on";
+  else if (st === "failed") d.className = "dot off";
+  else d.className = "dot";
 
   var st = run.status === "running" ? "运行中"
          : run.status === "stopping" ? "停止中"
@@ -792,7 +897,7 @@ function setRunState(run, running){
          : (run.status || "—");
   $("logStatus").textContent = "任务 #" + run.id + " · " + st
     + (run.stop_reason ? " · " + run.stop_reason : "");
-  $("btnStop").disabled = !(S.running || run.status === "stopping");
+  $("btnStop").disabled = !S.active;   // running 与 stopping 都应禁用：已经请求过了
 }
 
 /*
@@ -805,7 +910,12 @@ function tick(){
     if (!st || !st.ok) return;
     paintGitHub(st.github);
     paintLLM(st.llm);
-    if (!S.runId){
+    /*
+      自动接管正在跑的任务 —— 但【只在用户没主动退出时】。
+      原来无条件下，点「返回表单」后 2 秒就被拉回日志，那个按钮等于没用。
+      suppressAdopt 由 btnBack 置真，由 btnStart 或手动选中任务置假。
+    */
+    if (!S.runId && !S.suppressAdopt){
       var runs = st.runs || [], i, live = null;
       for (i = 0; i < runs.length; i++){
         if (runs[i].status === "running" || runs[i].status === "stopping"){ live = runs[i]; break; }
@@ -887,6 +997,7 @@ $("btnStart").onclick = function(){
       return;
     }
     S.runId = r.run.id;
+    S.suppressAdopt = false;
     S.running = true; S.ended = false;
     showLog();
     $("logBody").innerHTML = "";
@@ -899,14 +1010,24 @@ $("btnStart").onclick = function(){
 
 $("btnStop").onclick = function(){
   if (!S.runId) return;
-  this.disabled = true;
+  var btn = this;
+  btn.disabled = true;
+  hideMsg("formMsg");
   api("/api/runs/" + S.runId + "/stop", { method: "POST" }).then(function(r){
-    if (r && r.ok) pollRun();
-  }).catch(function(){});
+    if (r && r.ok){ pollRun(); return; }
+    // 停止失败必须说出来 —— 原来这里静默，用户以为已经停了
+    btn.disabled = false;
+    showMsg("formMsg", "bad", "停止失败：" + ((r && r.error) || "服务端返回失败"));
+  }).catch(function(e){
+    btn.disabled = false;
+    showMsg("formMsg", "bad", "停止请求失败：" + e.message);
+  });
 };
 
 $("btnBack").onclick = function(){
-  S.runId = null; S.running = false; S.ended = false;
+  S.runId = null;
+  S.running = false; S.stopping = false; S.active = false; S.ended = false; S.status = "";
+  S.suppressAdopt = true;      // 直到用户新建任务或手动选任务，否则 tick 别再拉我回去
   showForm();
   $("logBody").innerHTML = "";
   renderGhost();
@@ -924,13 +1045,48 @@ $("btnBack").onclick = function(){
 */
 $("btnApi").onclick = function(){
   $("apiMask").classList.add("on");
+  S.apiDirty = false;
   hideMsg("apiMsg");
   api("/api/state").then(function(st){ if (st && st.ok) paintLLM(st.llm); });
+  // 焦点移进弹窗，否则 Tab 会先走背景表单（无障碍审计提的焦点管理问题）
+  setTimeout(function(){ $("llmBase").focus(); $("llmBase").select(); }, 30);
 };
-function closeApi(){ $("apiMask").classList.remove("on"); }
+function closeApi(){
+  $("apiMask").classList.remove("on");
+  /*
+    必须在关闭时清空 Key 输入框。原来只有"保存成功"才清，点取消/✕ 后
+    重新打开弹窗，上一次敲进去的明文 secret 还躺在 DOM 里 —— 屏幕共享或
+    截图就漏了。Base/模型也要还原成服务端已保存值，撤掉被放弃的编辑。
+  */
+  $("llmKey").value = "";
+  S.apiDirty = false;
+  if (S.lastLlm) paintLLM(S.lastLlm);
+  $("btnApi").focus();      // 焦点回到触发按钮，键盘用户不会迷失
+}
 $("apiClose").onclick = closeApi;
 $("apiCancel").onclick = closeApi;
 $("apiMask").onclick = function(e){ if (e.target === this) closeApi(); };
+
+/* 一旦用户开始改输入框，就停掉 tick 的回写（见 paintLLM 里的 apiDirty 判断） */
+["llmBase","llmModel","llmKey"].forEach(function(id){
+  $(id).addEventListener("input", function(){ S.apiDirty = true; });
+});
+
+/*
+  Esc 关闭 + Tab 焦点陷阱。
+  没有这两样，键盘用户打开弹窗后会被卡住：Esc 无效，Tab 会跑到背后的表单里，
+  视觉上在被遮罩盖住的区域乱跳。
+*/
+document.addEventListener("keydown", function(e){
+  if (!$("apiMask").classList.contains("on")) return;
+  if (e.key === "Escape"){ e.preventDefault(); closeApi(); return; }
+  if (e.key !== "Tab") return;
+  var f = $("apiModal").querySelectorAll("input,button,select,textarea,a[href]");
+  if (!f.length) return;
+  var first = f[0], last = f[f.length - 1];
+  if (e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+});
 
 $("btnTest").onclick = function(){
   var btn = this;
